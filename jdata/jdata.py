@@ -131,7 +131,7 @@ def decode(d, opt={}):
 		    newobj=gzip.decompress(newobj)
 		elif(d['_ArrayZipType_']=='lzma'):
 		    newobj=lzma.decompress(newobj)
-	        newobj=np.fromstring(newobj).reshape(d['_ArrayZipSize_']);
+	        newobj=np.fromstring(newobj,dtype=np.dtype(d['_ArrayType_'])).reshape(d['_ArrayZipSize_']);
 		if('_ArrayIsComplex_' in d and newobj.shape[0]==2):
 		    newobj=newobj[0]+1j*newobj[1];
 		newobj=newobj.reshape(d['_ArraySize_']);
