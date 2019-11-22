@@ -6,22 +6,17 @@
 - URL: https://github.com/fangq/pyjdata
 
 
-JData Specification is a lightweight data annotation method targetted at
-storing and sharing complex data structures between different programming
-languages such as MATLAB, JavaScript, Python etc. Using JData format, a 
-complex data structure can be encoded as a structure that is easily 
+The [JData Specification](https://github.com/fangq/jdata/) defines a lightweight 
+language-independent data annotation interface targetted at
+storing and sharing complex data structures across different programming
+languages such as MATLAB, JavaScript, Python etc. Using JData formats, a 
+complex Python data structure can be encoded as a `dict` object that is easily 
 serialized as a JSON/binary JSON file and share such data between
 programs of different languages.
 
-The latest version of the JData specification can be found in the file named 
-[JData_specification.md](JData_specification.md). The specification is written
-in the [Markdown format](https://github.com/adam-p/markdown-here/wiki/Markdown-Cheatsheet) 
-for convenient editing and version control.
-
-
 ## How to use
 
-The PyJData module is easy to use. You can use the encode()/decode() functions to
+The PyJData module is easy to use. You can use the `encode()/decode()` functions to
 encode Python data into JData annotation format, or decode JData structures into
 native Python data, for example
 
