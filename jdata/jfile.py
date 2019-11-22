@@ -13,6 +13,7 @@ __all__ = ['load','save','show','loadt','savet','loadb','saveb','jext']
 import json
 import os
 import jdata as jd
+from collections import OrderedDict
 
 ##====================================================================================
 ## global variables
@@ -67,9 +68,14 @@ def loadt(fname, opt={}, **kwargs):
     @param[in] fname: a text JData (JSON based) file name
     @param[in] opt: options, if opt['decode']=True or 1 (default), call jdata.decode() after loading
     """
+    kwargs.setdefault('strict',False);
+    kwargs.setdefault('object_pairs_hook',OrderedDict);
+    opt.setdefault('decode',True);
+    
     with open(fname, "r") as fid:
-        data=json.load(fid, strict=False, **kwargs);
-    if(not ('decode' in opt and not(opt['decode'])) ):
+        data=json.load(fid, **kwargs);
+
+    if(opt['decode']):
         data=jd.decode(data,opt);
     return data
 
@@ -80,14 +86,14 @@ def savet(data, fname, opt={}, **kwargs):
     @param[in] fname: a text JData (JSON based) file name
     @param[in] opt: options, if opt['encode']=True or 1 (default), call jdata.encode() before saving
     """
-    if(not ('encode' in opt and not(opt['encode'])) ):
+    kwargs.setdefault('default',jd.jsonfilter);
+    opt.setdefault('encode',True);
+
+    if(opt['encode']):
         data=jd.encode(data,opt);
 
     with open(fname, "w") as fid:
-        if('default' in kwargs):
-            json.dump(data, fid, **kwargs);
-        else:
-            json.dump(data, fid, default=jd.jsonfilter,**kwargs);
+        json.dump(data, fid, **kwargs);
 
 def show(data, opt={}, **kwargs):
     """@brief Printing a python data as JSON string or return the JSON string (opt['string']=True)
@@ -95,14 +101,17 @@ def show(data, opt={}, **kwargs):
     @param[in] data: data to be saved
     @param[in] opt: options, if opt['encode']=True or 1 (default), call jdata.encode() before printing
     """
-    if(not ('encode' in opt and not(opt['encode'])) ):
+
+    kwargs.setdefault('default',jd.jsonfilter);
+    opt.setdefault('string',False);
+    opt.setdefault('encode',True);
+
+    if(opt['encode']):
         data=jd.encode(data,opt);
 
-    if('default' in kwargs):
-        str=json.dumps(data, **kwargs);
-    else:
-        str=json.dumps(data, default=jd.jsonfilter, **kwargs);
-    if('string' in opt and opt['string']):
+    str=json.dumps(data, **kwargs);
+
+    if(opt['string']):
         return str;
     else:
         print(str);
@@ -117,6 +126,8 @@ def loadb(fname, opt={}, **kwargs):
     @param[in] fname: a binary (UBJSON basede) JData file name
     @param[in] opt: options, if opt['decode']=True or 1 (default), call jdata.decode() before saving
     """
+    opt.setdefault('decode',True)
+
     try:
         import ubjson
     except ImportError:
@@ -124,7 +135,7 @@ def loadb(fname, opt={}, **kwargs):
     else:
         with open(fname, "r") as fid:
             data=ubjson.load(fid,**kwargs);
-        if(not ('decode' in opt and not(opt['decode'])) ):
+        if(opt['decode']):
             data=jd.decode(data,opt);
         return data
 
@@ -135,12 +146,14 @@ def saveb(data, fname, opt={}, **kwargs):
     @param[in] fname: a binary (UBJSON basede) JData file name
     @param[in] opt: options, if opt['encode']=True or 1 (default), call jdata.encode() before saving
     """
+    opt.setdefault('encode',True)
+
     try:
         import ubjson
     except ImportError:
         raise ImportError('To read/write binary JData files, you must install the py-ubjson module by "pip install py-ubjson"')
     else:
-        if(not ('encode' in opt and not(opt['encode'])) ):
+        if(opt['encode']):
             data=jd.encode(data,opt);
         with open(fname, "w") as fid:
             ubjson.dump(data, fid,**kwargs);
