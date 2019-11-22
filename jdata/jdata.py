@@ -128,7 +128,7 @@ def decode(d, opt={}):
                 if(d['_ArrayZipType_']=='zlib'):
                     newobj=zlib.decompress(newobj)
                 elif(d['_ArrayZipType_']=='gzip'):
-                    newobj=gzip.decompress(newobj,16+zlib.MAX_WBITS)
+                    newobj=zlib.decompress(newobj,16+zlib.MAX_WBITS)
                 elif(d['_ArrayZipType_']=='lzma'):
                     newobj=lzma.decompress(newobj)
                 newobj=np.fromstring(newobj,dtype=np.dtype(d['_ArrayType_'])).reshape(d['_ArrayZipSize_']);
