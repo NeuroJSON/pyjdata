@@ -34,11 +34,11 @@ def load(fname, opt={}, **kwargs):
     ext = spl[1].lower()
 
     if(ext in jext['t']):
-	return loadt(fname, opt, **kwargs);
+        return loadt(fname, opt, **kwargs);
     elif(ext in jext['b']):
-	return loadb(fname, opt, **kwargs);
+        return loadb(fname, opt, **kwargs);
     else:
-	raise Exception('JData', 'file extension is not recognized, accept (.json,.jdat,.jbat,.jnii,.bnii,.jmsh,.bmsh)')
+        raise Exception('JData', 'file extension is not recognized, accept (.json,.jdat,.jbat,.jnii,.bnii,.jmsh,.bmsh)')
 
 def save(data, fname, opt={}, **kwargs):
     """@brief Saving Python data to file (binary or text) according to the file extension
@@ -51,11 +51,11 @@ def save(data, fname, opt={}, **kwargs):
     ext = spl[1].lower()
 
     if(ext in jext['t']):
-	savet(data, fname, opt, **kwargs);
+        savet(data, fname, opt, **kwargs);
     elif(ext in jext['b']):
-	saveb(data, fname, opt, **kwargs);
+        saveb(data, fname, opt, **kwargs);
     else:
-	raise Exception('JData', 'file extension is not recognized, accept (.json,.jdat,.jbat,.jnii,.bnii,.jmsh,.bmsh)')
+        raise Exception('JData', 'file extension is not recognized, accept (.json,.jdat,.jbat,.jnii,.bnii,.jmsh,.bmsh)')
 
 ##====================================================================================
 ## Loading and saving text-based JData (i.e. JSON) files
@@ -70,7 +70,7 @@ def loadt(fname, opt={}, **kwargs):
     with open(fname, "r") as fid:
         data=json.load(fid, strict=False, **kwargs);
     if(not ('decode' in opt and not(opt['decode'])) ):
-	data=jd.decode(data,opt);
+        data=jd.decode(data,opt);
     return data
 
 def savet(data, fname, opt={}, **kwargs):
@@ -81,13 +81,13 @@ def savet(data, fname, opt={}, **kwargs):
     @param[in] opt: options, if opt['encode']=True or 1 (default), call jdata.encode() before saving
     """
     if(not ('encode' in opt and not(opt['encode'])) ):
-	data=jd.encode(data,opt);
+        data=jd.encode(data,opt);
 
     with open(fname, "w") as fid:
         if('default' in kwargs):
             json.dump(data, fid, **kwargs);
-	else:
-	    json.dump(data, fid, default=jd.jsonfilter,**kwargs);
+        else:
+            json.dump(data, fid, default=jd.jsonfilter,**kwargs);
 
 def show(data, opt={}, **kwargs):
     """@brief Printing a python data as JSON string or return the JSON string (opt['string']=True)
@@ -96,16 +96,16 @@ def show(data, opt={}, **kwargs):
     @param[in] opt: options, if opt['encode']=True or 1 (default), call jdata.encode() before printing
     """
     if(not ('encode' in opt and not(opt['encode'])) ):
-	data=jd.encode(data,opt);
+        data=jd.encode(data,opt);
 
     if('default' in kwargs):
-	str=json.dumps(data, **kwargs);
+        str=json.dumps(data, **kwargs);
     else:
-	str=json.dumps(data, default=jd.jsonfilter, **kwargs);
+        str=json.dumps(data, default=jd.jsonfilter, **kwargs);
     if('string' in opt and opt['string']):
-	return str;
+        return str;
     else:
-	print(str);
+        print(str);
 
 ##====================================================================================
 ## Loading and saving binary JData (i.e. UBJSON) files
@@ -120,13 +120,13 @@ def loadb(fname, opt={}, **kwargs):
     try:
         import ubjson
     except ImportError:
-	raise ImportError('To read/write binary JData files, you must install the py-ubjson module by "pip install py-ubjson"')
+        raise ImportError('To read/write binary JData files, you must install the py-ubjson module by "pip install py-ubjson"')
     else:
-	with open(fname, "r") as fid:
-	    data=ubjson.load(fid,**kwargs);
-	if(not ('decode' in opt and not(opt['decode'])) ):
-	    data=jd.decode(data,opt);
-	return data
+        with open(fname, "r") as fid:
+            data=ubjson.load(fid,**kwargs);
+        if(not ('decode' in opt and not(opt['decode'])) ):
+            data=jd.decode(data,opt);
+        return data
 
 def saveb(data, fname, opt={}, **kwargs):
     """@brief Saving a Python data structure to a binary JData (UBJSON) file
@@ -138,10 +138,10 @@ def saveb(data, fname, opt={}, **kwargs):
     try:
         import ubjson
     except ImportError:
-	raise ImportError('To read/write binary JData files, you must install the py-ubjson module by "pip install py-ubjson"')
+        raise ImportError('To read/write binary JData files, you must install the py-ubjson module by "pip install py-ubjson"')
     else:
-	if(not ('encode' in opt and not(opt['encode'])) ):
-	    data=jd.encode(data,opt);
+        if(not ('encode' in opt and not(opt['encode'])) ):
+            data=jd.encode(data,opt);
         with open(fname, "w") as fid:
             ubjson.dump(data, fid,**kwargs);
 

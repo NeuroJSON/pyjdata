@@ -48,51 +48,51 @@ def encode(d, opt={}):
     @param[in] opt: options, can contain 'compression'=['zlib','lzma','gzip'] for data compression
     """
     if isinstance(d, float):
-	if(np.isnan(d)):
-	    return '_NaN_';
-	elif(np.isinf(d)):
-	    return '_Inf_' if (d>0) else '-_Inf_';
-	return d;
+        if(np.isnan(d)):
+            return '_NaN_';
+        elif(np.isinf(d)):
+            return '_Inf_' if (d>0) else '-_Inf_';
+        return d;
     elif isinstance(d, list) or isinstance(d, tuple) or isinstance(d, set) or isinstance(d, frozenset):
-	return encodelist(d,opt);
+        return encodelist(d,opt);
     elif isinstance(d, dict):
-	return encodedict(d,opt);
+        return encodedict(d,opt);
     elif isinstance(d, complex):
-	newobj={
-	    '_ArrayType_': 'double',
-	    '_ArraySize_': 1,
-	    '_ArrayIsComplex_': True,
-	    '_ArrayData_': [d.real, d.imag]
-	  };
-	return newobj;
+        newobj={
+            '_ArrayType_': 'double',
+            '_ArraySize_': 1,
+            '_ArrayIsComplex_': True,
+            '_ArrayData_': [d.real, d.imag]
+          };
+        return newobj;
     elif isinstance(d, np.ndarray):
-	newobj={};
-	newobj["_ArrayType_"]=jdtype[str(d.dtype)] if (str(d.dtype) in jdtype) else str(d.dtype);
-	newobj["_ArraySize_"]=list(d.shape);
-	if(d.dtype==np.complex64 or d.dtype==np.complex128 or d.dtype==np.csingle or d.dtype==np.cdouble):
-		newobj['_ArrayIsComplex_']=True;
-        	newobj['_ArrayData_']=[list(d.flatten().real), list(d.flatten().imag)];
-	else:
-        	newobj["_ArrayData_"]=list(d.flatten());
+        newobj={};
+        newobj["_ArrayType_"]=jdtype[str(d.dtype)] if (str(d.dtype) in jdtype) else str(d.dtype);
+        newobj["_ArraySize_"]=list(d.shape);
+        if(d.dtype==np.complex64 or d.dtype==np.complex128 or d.dtype==np.csingle or d.dtype==np.cdouble):
+                newobj['_ArrayIsComplex_']=True;
+                newobj['_ArrayData_']=[list(d.flatten().real), list(d.flatten().imag)];
+        else:
+                newobj["_ArrayData_"]=list(d.flatten());
 
-	if('compression' in opt):
-		if(opt['compression'] not in _zipper):
-		    raise Exception('JData', 'compression method is not supported')
-		newobj['_ArrayZipType_']=opt['compression'];
-		newobj['_ArrayZipSize_']=[1+int('_ArrayIsComplex_' in newobj), d.size];
-		newobj['_ArrayZipData_']=np.asarray(newobj['_ArrayData_'],dtype=d.dtype).tostring();
-		if(opt['compression']=='zlib'):
-		    newobj['_ArrayZipData_']=zlib.compress(newobj['_ArrayZipData_']);
-		elif(opt['compression']=='gzip'):
-		    newobj['_ArrayZipData_']=gzip.compress(newobj['_ArrayZipData_']);
-		elif(opt['compression']=='lzma'):
-		    newobj['_ArrayZipData_']=lzma.compress(newobj['_ArrayZipData_']);
-		if(not ('base64' in opt and not(opt['base64']))):
-		    newobj['_ArrayZipData_']=base64.b64encode(newobj['_ArrayZipData_']);
-		newobj.pop('_ArrayData_');
-	return newobj;
+        if('compression' in opt):
+                if(opt['compression'] not in _zipper):
+                    raise Exception('JData', 'compression method is not supported')
+                newobj['_ArrayZipType_']=opt['compression'];
+                newobj['_ArrayZipSize_']=[1+int('_ArrayIsComplex_' in newobj), d.size];
+                newobj['_ArrayZipData_']=np.asarray(newobj['_ArrayData_'],dtype=d.dtype).tostring();
+                if(opt['compression']=='zlib'):
+                    newobj['_ArrayZipData_']=zlib.compress(newobj['_ArrayZipData_']);
+                elif(opt['compression']=='gzip'):
+                    newobj['_ArrayZipData_']=gzip.compress(newobj['_ArrayZipData_']);
+                elif(opt['compression']=='lzma'):
+                    newobj['_ArrayZipData_']=lzma.compress(newobj['_ArrayZipData_']);
+                if(not ('base64' in opt and not(opt['base64']))):
+                    newobj['_ArrayZipData_']=base64.b64encode(newobj['_ArrayZipData_']);
+                newobj.pop('_ArrayData_');
+        return newobj;
     else:
-	return copy.deepcopy(d);
+        return copy.deepcopy(d);
 
 ##====================================================================================
 ## JData to Python decoding function
@@ -109,45 +109,45 @@ def decode(d, opt={}):
     """
 
     if (isinstance(d, str) or isinstance(d, unicode)) and len(d)<=6 and len(d)>4 and d[-1]=='_':
-	if(d=='_NaN_'):
-	    return float('nan');
-	elif(d=='_Inf_'):
-	    return float('inf');
-	elif(d=='-_Inf_'):
-	    return float('-inf');
+        if(d=='_NaN_'):
+            return float('nan');
+        elif(d=='_Inf_'):
+            return float('inf');
+        elif(d=='-_Inf_'):
+            return float('-inf');
         return d;
     elif isinstance(d, list) or isinstance(d, tuple) or isinstance(d, set) or isinstance(d, frozenset):
-	return decodelist(d,opt);
+        return decodelist(d,opt);
     elif isinstance(d, dict):
-	if('_ArrayType_' in d):
-	    if('_ArrayZipData_' in d):
-		newobj=d['_ArrayZipData_']
-		if(not ('base64' in opt and not(opt['base64']))):
-		    newobj=base64.b64decode(newobj)
-		if('_ArrayZipType_' in d and d['_ArrayZipType_'] not in _zipper):
-		    raise Exception('JData', 'compression method is not supported')
-		if(d['_ArrayZipType_']=='zlib'):
-		    newobj=zlib.decompress(newobj)
-		elif(d['_ArrayZipType_']=='gzip'):
-		    newobj=gzip.decompress(newobj)
-		elif(d['_ArrayZipType_']=='lzma'):
-		    newobj=lzma.decompress(newobj)
-	        newobj=np.fromstring(newobj,dtype=np.dtype(d['_ArrayType_'])).reshape(d['_ArrayZipSize_']);
-		if('_ArrayIsComplex_' in d and newobj.shape[0]==2):
-		    newobj=newobj[0]+1j*newobj[1];
-		newobj=newobj.reshape(d['_ArraySize_']);
-		return newobj;
-	    elif('_ArrayData_' in d):
-		newobj=np.asarray(d['_ArrayData_'],dtype=np.dtype(d['_ArrayType_']));
-		if('_ArrayIsComplex_' in d and newobj.shape[0]==2):
-		    newobj=newobj[0]+1j*newobj[1];
-		newobj=newobj.reshape(d['_ArraySize_']);
-		return newobj;
-	    else:
-		raise Exception('JData', 'one and only one of _ArrayData_ or _ArrayZipData_ is required')
-	return decodedict(d,opt);
+        if('_ArrayType_' in d):
+            if('_ArrayZipData_' in d):
+                newobj=d['_ArrayZipData_']
+                if(not ('base64' in opt and not(opt['base64']))):
+                    newobj=base64.b64decode(newobj)
+                if('_ArrayZipType_' in d and d['_ArrayZipType_'] not in _zipper):
+                    raise Exception('JData', 'compression method is not supported')
+                if(d['_ArrayZipType_']=='zlib'):
+                    newobj=zlib.decompress(newobj)
+                elif(d['_ArrayZipType_']=='gzip'):
+                    newobj=gzip.decompress(newobj)
+                elif(d['_ArrayZipType_']=='lzma'):
+                    newobj=lzma.decompress(newobj)
+                newobj=np.fromstring(newobj,dtype=np.dtype(d['_ArrayType_'])).reshape(d['_ArrayZipSize_']);
+                if('_ArrayIsComplex_' in d and newobj.shape[0]==2):
+                    newobj=newobj[0]+1j*newobj[1];
+                newobj=newobj.reshape(d['_ArraySize_']);
+                return newobj;
+            elif('_ArrayData_' in d):
+                newobj=np.asarray(d['_ArrayData_'],dtype=np.dtype(d['_ArrayType_']));
+                if('_ArrayIsComplex_' in d and newobj.shape[0]==2):
+                    newobj=newobj[0]+1j*newobj[1];
+                newobj=newobj.reshape(d['_ArraySize_']);
+                return newobj;
+            else:
+                raise Exception('JData', 'one and only one of _ArrayData_ or _ArrayZipData_ is required')
+        return decodedict(d,opt);
     else:
-	return copy.deepcopy(d);
+        return copy.deepcopy(d);
 
 ##====================================================================================
 ## helper functions
@@ -155,25 +155,25 @@ def decode(d, opt={}):
 
 def jsonfilter(obj):
     if isinstance(obj, long):
-	return str(obj) 
+        return str(obj) 
     elif type(obj).__module__ == np.__name__:
         if isinstance(obj, np.ndarray):
             return obj.tolist()
         else:
             return obj.item()
     elif isinstance(obj, float):
-	if(np.isnan(obj)):
-	    return '_NaN_';
-	elif(np.isinf(obj)):
-	    return '_Inf_' if (obj>0) else '-_Inf_';
+        if(np.isnan(obj)):
+            return '_NaN_';
+        elif(np.isinf(obj)):
+            return '_Inf_' if (obj>0) else '-_Inf_';
 
 def encodedict(d0, opt={}):
     d=dict(d0);
     for k, v in d.items():
-	newkey=encode(k,opt)
-	d[newkey]=encode(v,opt);
-	if(k!=newkey):
-	    d.pop(k)
+        newkey=encode(k,opt)
+        d[newkey]=encode(v,opt);
+        if(k!=newkey):
+            d.pop(k)
     return d;
 
 def encodelist(d0, opt={}):
@@ -185,10 +185,10 @@ def encodelist(d0, opt={}):
 def decodedict(d0, opt={}):
     d=dict(d0);
     for k, v in d.items():
-	newkey=encode(k,opt)
-	d[newkey]=decode(v,opt);
-	if(k!=newkey):
-	    d.pop(k)
+        newkey=encode(k,opt)
+        d[newkey]=decode(v,opt);
+        if(k!=newkey):
+            d.pop(k)
     return d;
 
 def decodelist(d0, opt={}):
