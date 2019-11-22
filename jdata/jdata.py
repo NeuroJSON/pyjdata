@@ -108,7 +108,7 @@ def decode(d, opt={}):
     @param[in] opt: options
     """
 
-    if (isinstance(d, str) or isinstance(d, unicode)) and len(d)<=6 and len(d)>4 and d[-1]=='_':
+    if (isinstance(d, str) or type(d)=='unicode') and len(d)<=6 and len(d)>4 and d[-1]=='_':
         if(d=='_NaN_'):
             return float('nan');
         elif(d=='_Inf_'):
