@@ -13,7 +13,7 @@ import argparse
 import os
 import sys
 
-from jdata import loadjt, savejt, loadjb, savejb
+from jdata import load, save
 
 
 def main():
@@ -41,8 +41,8 @@ def main():
             try:
                 if os.path.exists(dest) and not args.force:
                     raise Exception('File {} already exists.'.format(dest))
-                data = loadjt(path)
-                savejb(data, dest)
+                data = load(path)
+                save(data, dest)
                 if args.remove_input:
                     os.remove(path)
             except Exception as e:
@@ -54,8 +54,8 @@ def main():
             try:
                 if os.path.exists(dest) and not args.force:
                     raise Exception('File {} already exists.'.format(dest))
-                data = loadjb(path)
-                savejt(data,dest)
+                data = load(path)
+                save(data,dest)
                 if args.remove_input:
                     os.remove(path)
             except RuntimeError as e:
@@ -64,7 +64,6 @@ def main():
         else:
             print('Unsupported file extension on file: {}'.format(path))
             sys.exit(1)
-
 
 if __name__ == '__main__':
     main()

@@ -1,27 +1,53 @@
-"""Encoding and decoding python native data structures as 
+"""@package docstring
+Encoding and decoding python native data structures as 
 portable JData-spec annotated dict structure
 
 Copyright (c) 2019 Qianqian Fang <q.fang at neu.edu>
 """
 
-__all__ = ['encode','decode']
+__all__ = ['encode','decode','jdtype','jsonfilter']
 
+##====================================================================================
+## dependent libraries
+##====================================================================================
 
 import numpy as np
-import zlib
-import base64
 import copy
+import zlib
+import gzip
+import lzma
+import base64
+
+##====================================================================================
+## global variables
+##====================================================================================
+
+""" @brief Mapping Numpy data types to JData data types
+complex-valued data are reflected in the doubled data size
+"""
 
 jdtype={'float32':'single','float64':'double','float_':'double',
 'bool':'uint8','byte':'int8','short':'int16','ubyte':'uint8',
-'ushort':'uint16','int_':'int32','uint':'uint32',
+'ushort':'uint16','int_':'int32','uint':'uint32','complex_':'double',
 'longlong':'int64','ulonglong':'uint64','csingle':'single','cdouble':'double'};
 
+_zipper=['zlib','gzip','lzma'];
+
+##====================================================================================
+## Python to JData encoding function
+##====================================================================================
+
 def encode(d, opt={}):
-    """encode a Python data structure."""
-    if isinstance(d, str) or isinstance(d, int) or isinstance(d, bool):
-        return d;
-    elif isinstance(d, float):
+    """@brief Encoding a Python data structure to portable JData-annotated dict constructs
+    
+    This function converts complex data types (usually not JSON-serializable) into
+    portable JData-annotated dict/list constructs that can be easily exported as JSON/JData
+    files
+    
+    @param[in,out] d: an arbitrary Python data
+    @param[in] opt: options, can contain 'compression'=['zlib','lzma','gzip'] for data compression
+    """
+    if isinstance(d, float):
 	if(np.isnan(d)):
 	    return '_NaN_';
 	elif(np.isinf(d)):
@@ -32,7 +58,7 @@ def encode(d, opt={}):
     elif isinstance(d, dict):
 	return encodedict(d,opt);
     elif isinstance(d, complex):
-	newobj={
+	return {
 	    '_ArrayType_': 'double',
 	    '_ArraySize_': 1,
 	    '_ArrayIsComplex_': True,
@@ -47,21 +73,41 @@ def encode(d, opt={}):
         	newobj['_ArrayData_']=[list(d.flatten().real), list(d.flatten().imag)];
 	else:
         	newobj["_ArrayData_"]=list(d.flatten());
-	if('compression' in opt and opt['compression']=='zlib'):
+
+	if('compression' in opt):
+		if(opt['compression'] not in _zipper):
+		    raise Exception('JData', 'compression method is not supported')
 		newobj['_ArrayZipType_']=opt['compression'];
 		newobj['_ArrayZipSize_']=[1+int('_ArrayIsComplex_' in newobj), d.size];
 		newobj['_ArrayZipData_']=np.asarray(newobj['_ArrayData_'],dtype=d.dtype).tostring();
-		newobj['_ArrayZipData_']=base64.b64encode(zlib.compress(newobj['_ArrayZipData_']));
+		if(opt['compression']=='zlib'):
+		    newobj['_ArrayZipData_']=zlib.compress(newobj['_ArrayZipData_']);
+		elif(opt['compression']=='gzip'):
+		    newobj['_ArrayZipData_']=gzip.compress(newobj['_ArrayZipData_']);
+		elif(opt['compression']=='lzma'):
+		    newobj['_ArrayZipData_']=lzma.compress(newobj['_ArrayZipData_']);
+		if(not ('base64' in opt and not(opt['base64']))):
+		    newobj['_ArrayZipData_']=base64.b64encode(newobj['_ArrayZipData_']);
 		newobj.pop('_ArrayData_');
+	return newobj;
     else:
 	return copy.deepcopy(d);
-    return newobj;
 
+##====================================================================================
+## JData to Python decoding function
+##====================================================================================
 
 def decode(d, opt={}):
-    """encode a Python data structure."""
+    """@brief Decoding a JData-annotated dict constructs into native Python data
+    
+    This function converts portable JData-annotated dict/list constructs back to native Python
+    data structures
+    
+    @param[in,out] d: an arbitrary Python data, any JData-encoded components will be decoded
+    @param[in] opt: options
+    """
 
-    if isinstance(d, str) and len(d)<=6 and d[-1]=='_':
+    if (isinstance(d, str) or isinstance(d, unicode)) and len(d)<=6 and d[-1]=='_':
 	if(d=='_NaN_'):
 	    return float('nan');
 	elif(d=='_Inf_'):
@@ -74,8 +120,19 @@ def decode(d, opt={}):
     elif isinstance(d, dict):
 	if('_ArrayType_' in d):
 	    if('_ArrayZipData_' in d):
-		newobj=np.fromstring(base64.b64decode(zlib.uncompress(d['_ArrayZipData_'])),dtype=np.dtype(d['_ArrayType_']));
-		newobj=newobj.reshape(d['_ArrayZipSize_']);
+		newobj=d['_ArrayZipData_']
+		if(not ('base64' in opt and not(opt['base64']))):
+		    newobj=base64.b64decode(newobj)
+		if('_ArrayZipType_' in d and d['_ArrayZipType_'] not in _zipper):
+		    raise Exception('JData', 'compression method is not supported')
+		if(d['_ArrayZipType_']=='zlib'):
+		    newobj=zlib.decompress(newobj)
+		elif(d['_ArrayZipType_']=='gzip'):
+		    newobj=gzip.decompress(newobj)
+		elif(d['_ArrayZipType_']=='lzma'):
+		    newobj=lzma.decompress(newobj)
+		print(newobj)
+	        newobj=np.fromstring(newobj).reshape(d['_ArrayZipSize_']);
 		if('_ArrayIsComplex_' in d and newobj.shape[0]==2):
 		    newobj=newobj[0]+1j*newobj[1];
 		newobj=newobj.reshape(d['_ArraySize_']);
@@ -90,10 +147,31 @@ def decode(d, opt={}):
     else:
 	return copy.deepcopy(d);
 
+##====================================================================================
+## helper functions
+##====================================================================================
+
+def jsonfilter(obj):
+    if isinstance(obj, long):
+	return str(obj) 
+    elif type(obj).__module__ == np.__name__:
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        else:
+            return obj.item()
+    elif isinstance(obj, float):
+	if(np.isnan(obj)):
+	    return '_NaN_';
+	elif(np.isinf(obj)):
+	    return '_Inf_' if (obj>0) else '-_Inf_';
+
 def encodedict(d0, opt={}):
     d=dict(d0);
     for k, v in d.items():
-	d[k]=encode(v,opt);
+	newkey=encode(k,opt)
+	d[newkey]=encode(v,opt);
+	if(k!=newkey):
+	    d.pop(k)
     return d;
 
 def encodelist(d, opt={}):
@@ -104,7 +182,10 @@ def encodelist(d, opt={}):
 def decodedict(d0, opt={}):
     d=dict(d0);
     for k, v in d.items():
-	d[k]=decode(v,opt);
+	newkey=encode(k,opt)
+	d[newkey]=decode(v,opt);
+	if(k!=newkey):
+	    d.pop(k)
     return d;
 
 def decodelist(d, opt={}):

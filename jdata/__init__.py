@@ -29,12 +29,13 @@ into JData compatible dict-based objects
 The JData-encoded data object can then be decoded using ``decode``
 to restore the original data types
 """
-from .jfile import load, save, loadj, savej, loadb, saveb
-from .jdata import encode, decode
 
-__version__ = '0.1'
-__all__ = ['load','save','loadj', 'savej', 'loadb', 'saveb','encode', 'decode']
-__license__ = """The GNU General Public License v3 or later, Copyright (c) 2019 Qianqian Fang"""
+from .jfile import load, save, loadt, savet, loadb, saveb
+from .jdata import encode, decode, jdtype, jsonfilter
+
+__version__ = '0.2'
+__all__ = ['load','save','loadt', 'savet', 'loadb', 'saveb','encode', 'decode', 'jdtype','jsonfilter']
+__license__ = """Apache license 2.0, Copyright (c) 2019 Qianqian Fang"""
 
 
 if __name__ == '__main__':
