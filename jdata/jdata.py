@@ -14,7 +14,6 @@ __all__ = ['encode','decode','jdtype','jsonfilter']
 import numpy as np
 import copy
 import zlib
-import gzip
 import lzma
 import base64
 
@@ -84,7 +83,7 @@ def encode(d, opt={}):
                 if(opt['compression']=='zlib'):
                     newobj['_ArrayZipData_']=zlib.compress(newobj['_ArrayZipData_']);
                 elif(opt['compression']=='gzip'):
-                    newobj['_ArrayZipData_']=gzip.compress(newobj['_ArrayZipData_']);
+                    newobj['_ArrayZipData_']=zlib.compress(newobj['_ArrayZipData_'],16+zlib.MAX_WBITS);
                 elif(opt['compression']=='lzma'):
                     newobj['_ArrayZipData_']=lzma.compress(newobj['_ArrayZipData_']);
                 if(not ('base64' in opt and not(opt['base64']))):
@@ -129,7 +128,7 @@ def decode(d, opt={}):
                 if(d['_ArrayZipType_']=='zlib'):
                     newobj=zlib.decompress(newobj)
                 elif(d['_ArrayZipType_']=='gzip'):
-                    newobj=gzip.decompress(newobj)
+                    newobj=gzip.decompress(newobj,16+zlib.MAX_WBITS)
                 elif(d['_ArrayZipType_']=='lzma'):
                     newobj=lzma.decompress(newobj)
                 newobj=np.fromstring(newobj,dtype=np.dtype(d['_ArrayType_'])).reshape(d['_ArrayZipSize_']);
