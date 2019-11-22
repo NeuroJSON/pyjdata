@@ -58,12 +58,13 @@ def encode(d, opt={}):
     elif isinstance(d, dict):
 	return encodedict(d,opt);
     elif isinstance(d, complex):
-	return {
+	newobj={
 	    '_ArrayType_': 'double',
 	    '_ArraySize_': 1,
 	    '_ArrayIsComplex_': True,
 	    '_ArrayData_': [d.real, d.imag]
 	  };
+	return newobj;
     elif isinstance(d, np.ndarray):
 	newobj={};
 	newobj["_ArrayType_"]=jdtype[str(d.dtype)] if (str(d.dtype) in jdtype) else str(d.dtype);
@@ -107,7 +108,7 @@ def decode(d, opt={}):
     @param[in] opt: options
     """
 
-    if (isinstance(d, str) or isinstance(d, unicode)) and len(d)<=6 and d[-1]=='_':
+    if (isinstance(d, str) or isinstance(d, unicode)) and len(d)<=6 and len(d)>4 and d[-1]=='_':
 	if(d=='_NaN_'):
 	    return float('nan');
 	elif(d=='_Inf_'):
@@ -142,6 +143,8 @@ def decode(d, opt={}):
 		    newobj=newobj[0]+1j*newobj[1];
 		newobj=newobj.reshape(d['_ArraySize_']);
 		return newobj;
+	    else:
+		raise Exception('JData', 'one and only one of _ArrayData_ or _ArrayZipData_ is required')
 	return decodedict(d,opt);
     else:
 	return copy.deepcopy(d);
@@ -173,7 +176,8 @@ def encodedict(d0, opt={}):
 	    d.pop(k)
     return d;
 
-def encodelist(d, opt={}):
+def encodelist(d0, opt={}):
+    d=copy.deepcopy(d0)
     for i, s in enumerate(d):
         d[i] = encode(s,opt);
     return d;
@@ -187,7 +191,8 @@ def decodedict(d0, opt={}):
 	    d.pop(k)
     return d;
 
-def decodelist(d, opt={}):
+def decodelist(d0, opt={}):
+    d=copy.deepcopy(d0)
     for i, s in enumerate(d):
         d[i] = decode(s,opt);
     return d;
