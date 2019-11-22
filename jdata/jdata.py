@@ -85,7 +85,7 @@ def encode(d, opt={}):
                 elif(opt['compression']=='gzip'):
                     newobj['_ArrayZipData_']=zlib.compress(newobj['_ArrayZipData_'],16+zlib.MAX_WBITS);
                 elif(opt['compression']=='lzma'):
-                    newobj['_ArrayZipData_']=lzma.compress(newobj['_ArrayZipData_']);
+                    newobj['_ArrayZipData_']=lzma.compress(newobj['_ArrayZipData_'],lzma.FORMAT_ALONE);
                 if(not ('base64' in opt and not(opt['base64']))):
                     newobj['_ArrayZipData_']=base64.b64encode(newobj['_ArrayZipData_']);
                 newobj.pop('_ArrayData_');
@@ -98,7 +98,7 @@ def encode(d, opt={}):
 ##====================================================================================
 
 def decode(d, opt={}):
-    """@brief Decoding a JData-annotated dict constructs into native Python data
+    """@brief Decoding a JData-annotated dict construct into native Python data
     
     This function converts portable JData-annotated dict/list constructs back to native Python
     data structures
@@ -130,7 +130,7 @@ def decode(d, opt={}):
                 elif(d['_ArrayZipType_']=='gzip'):
                     newobj=zlib.decompress(newobj,16+zlib.MAX_WBITS)
                 elif(d['_ArrayZipType_']=='lzma'):
-                    newobj=lzma.decompress(newobj)
+                    newobj=lzma.decompress(newobj,lzma.FORMAT_ALONE)
                 newobj=np.fromstring(newobj,dtype=np.dtype(d['_ArrayType_'])).reshape(d['_ArrayZipSize_']);
                 if('_ArrayIsComplex_' in d and newobj.shape[0]==2):
                     newobj=newobj[0]+1j*newobj[1];

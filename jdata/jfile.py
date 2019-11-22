@@ -123,7 +123,7 @@ def show(data, opt={}, **kwargs):
 def loadb(fname, opt={}, **kwargs):
     """@brief Loading a binary (UBJSON) JData file and decode it to native Python data
 
-    @param[in] fname: a binary (UBJSON basede) JData file name
+    @param[in] fname: a binary (UBJSON based) JData file name
     @param[in] opt: options, if opt['decode']=True or 1 (default), call jdata.decode() before saving
     """
     opt.setdefault('decode',True)
@@ -143,7 +143,7 @@ def saveb(data, fname, opt={}, **kwargs):
     """@brief Saving a Python data structure to a binary JData (UBJSON) file
 
     @param[in] data: data to be saved
-    @param[in] fname: a binary (UBJSON basede) JData file name
+    @param[in] fname: a binary (UBJSON based) JData file name
     @param[in] opt: options, if opt['encode']=True or 1 (default), call jdata.encode() before saving
     """
     opt.setdefault('encode',True)
