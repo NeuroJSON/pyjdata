@@ -36,7 +36,7 @@ def main():
         spl = os.path.splitext(path)
         ext = spl[1].lower()
 
-        if ext == '.json' || ext == '.jdat':
+        if ext == '.json' or ext == '.jdat':
             dest = spl[0] + '.jbat'
             try:
                 if os.path.exists(dest) and not args.force:
