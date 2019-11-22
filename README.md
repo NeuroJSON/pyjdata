@@ -14,6 +14,14 @@ complex Python data structure can be encoded as a `dict` object that is easily
 serialized as a JSON/binary JSON file and share such data between
 programs of different languages.
 
+## How to install
+
+* Github: download from https://github.com/fangq/pyjdata
+* PIP: run `pip install jdata` see https://pypi.org/project/jdata/
+
+If you download a local copy via git clone or github download, after unzipping
+the package, you can 
+
 ## How to use
 
 The PyJData module is easy to use. You can use the `encode()/decode()` functions to
