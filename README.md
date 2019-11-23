@@ -1,4 +1,5 @@
-# JData for Python - a lightweight and portable data annotation method
+JData for Python - a lightweight and portable data annotation method
+========
 
 - Copyright: (C) Qianqian Fang (2019) <q.fang at neu.edu>
 - License: Apache License, Version 2.0
@@ -14,7 +15,8 @@ complex Python data structure can be encoded as a `dict` object that is easily
 serialized as a JSON/binary JSON file and share such data between
 programs of different languages.
 
-## How to install
+How to install
+---------------
 
 * Github: download from https://github.com/fangq/pyjdata
 * PIP: run `pip install jdata` see https://pypi.org/project/jdata/
@@ -22,7 +24,8 @@ programs of different languages.
 If you download a local copy via git clone or github download, after unzipping
 the package, you can 
 
-## How to use
+How to use
+---------------
 
 The PyJData module is easy to use. You can use the `encode()/decode()` functions to
 encode Python data into JData annotation format, or decode JData structures into

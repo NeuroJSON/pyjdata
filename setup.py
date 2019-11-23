@@ -6,7 +6,7 @@ with open("README.md", "r") as fh:
 setup(
   name = 'jdata',
   packages = ['jdata'],
-  version = '0.2.2',
+  version = '0.2.3',
   license='Apache license 2.0',
   description = 'Encoding and decoding Python data structrues using portable JData-annotated formats',
   long_description=readme,
