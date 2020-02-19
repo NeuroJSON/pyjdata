@@ -19,7 +19,7 @@ from collections import OrderedDict
 ## global variables
 ##====================================================================================
 
-jext={'t':['.json','.jdat','.jnii','.jmsh'], 'b':['.ubj','.jbat','.bnii','.bmsh']};
+jext={'t':['.json','.jdt','.jdat','.jnii','.jmsh'], 'b':['.ubj','.jdb','.jbat','.bnii','.bmsh']};
 
 ##====================================================================================
 ## Loading and saving data based on file extensions
