@@ -26,7 +26,7 @@ def main():
 
     parser.add_argument(
         'file', nargs='+',
-        help='path to a text-JData (.json, .jdat) file or a binary JData (.jbat) file')
+        help='path to a text-JData (.json, .jdat) file or a binary JData (.bjd, .jbat) file')
     parser.add_argument(
         '-f', '--force', action='store_const', const=True,
         default=False, help='overwrite existing files when converting')
@@ -49,7 +49,7 @@ def main():
                 print('Error: {}'.format(e))
                 sys.exit(1)
 
-        elif ext == '.jbat':
+        elif ext == '.bjd' or ext == '.jbat':
             dest = spl[0] + '.json'
             try:
                 if os.path.exists(dest) and not args.force:
