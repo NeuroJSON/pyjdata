@@ -133,7 +133,7 @@ def loadb(fname, opt={}, **kwargs):
     except ImportError:
         raise ImportError('To read/write binary JData files, you must install the py-ubjson module by "pip install py-ubjson"')
     else:
-        with open(fname, "r") as fid:
+        with open(fname, "rb") as fid:
             data=ubjson.load(fid,**kwargs);
         if(opt['decode']):
             data=jd.decode(data,opt);
@@ -155,7 +155,7 @@ def saveb(data, fname, opt={}, **kwargs):
     else:
         if(opt['encode']):
             data=jd.encode(data,opt);
-        with open(fname, "w") as fid:
+        with open(fname, "wb") as fid:
             ubjson.dump(data, fid,**kwargs);
 
 ##====================================================================================
