@@ -19,6 +19,10 @@ programs of different languages.
 * Github: download from https://github.com/fangq/pyjdata
 * PIP: run `pip install jdata` see https://pypi.org/project/jdata/
 
+Optional Dependency (if reading or writing Binary JData/UBJSON files):
+* **bjdata**: PIP: run `pip install bjdata` see https://pypi.org/project/bjdata/
+* **numpy**: PIP: run `pip install numpy` or `sudo apt-get install python-numpy`
+
 ## How to use
 
 The PyJData module is easy to use. You can use the `encode()/decode()` functions to

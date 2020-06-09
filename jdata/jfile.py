@@ -19,7 +19,7 @@ from collections import OrderedDict
 ## global variables
 ##====================================================================================
 
-jext={'t':['.json','.jdt','.jdat','.jnii','.jmsh'], 'b':['.ubj','.bjd','.jdb','.jbat','.bnii','.bmsh']};
+jext={'t':['.json','.jdt','.jdat','.jnii','.jmsh','.jnirs'], 'b':['.ubj','.bjd','.jdb','.jbat','.bnii','.bmsh','.jamm','.bnirs']};
 
 ##====================================================================================
 ## Loading and saving data based on file extensions
@@ -121,42 +121,42 @@ def show(data, opt={}, **kwargs):
 ##====================================================================================
 
 def loadb(fname, opt={}, **kwargs):
-    """@brief Loading a binary (UBJSON) JData file and decode it to native Python data
+    """@brief Loading a binary (BJData/UBJSON) JData file and decode it to native Python data
 
-    @param[in] fname: a binary (UBJSON based) JData file name
+    @param[in] fname: a binary (BJData/UBJSON based) JData file name
     @param[in] opt: options, if opt['decode']=True or 1 (default), call jdata.decode() before saving
     """
     opt.setdefault('decode',True)
 
     try:
-        import ubjson
+        import bjdata
     except ImportError:
-        raise ImportError('To read/write binary JData files, you must install the py-ubjson module by "pip install py-ubjson"')
+        raise ImportError('To read/write binary JData files, you must install the bjdata module by "pip install bjdata"')
     else:
         with open(fname, "rb") as fid:
-            data=ubjson.load(fid,**kwargs);
+            data=bjdata.load(fid,**kwargs);
         if(opt['decode']):
             data=jd.decode(data,opt);
         return data
 
 def saveb(data, fname, opt={}, **kwargs):
-    """@brief Saving a Python data structure to a binary JData (UBJSON) file
+    """@brief Saving a Python data structure to a binary JData (BJData/UBJSON) file
 
     @param[in] data: data to be saved
-    @param[in] fname: a binary (UBJSON based) JData file name
+    @param[in] fname: a binary (BJData/UBJSON based) JData file name
     @param[in] opt: options, if opt['encode']=True or 1 (default), call jdata.encode() before saving
     """
     opt.setdefault('encode',True)
 
     try:
-        import ubjson
+        import bjdata
     except ImportError:
-        raise ImportError('To read/write binary JData files, you must install the py-ubjson module by "pip install py-ubjson"')
+        raise ImportError('To read/write binary JData files, you must install the bjdata module by "pip install bjdata"')
     else:
         if(opt['encode']):
             data=jd.encode(data,opt);
         with open(fname, "wb") as fid:
-            ubjson.dump(data, fid,**kwargs);
+            bjdata.dump(data, fid,**kwargs);
 
 ##====================================================================================
 ## helper functions
