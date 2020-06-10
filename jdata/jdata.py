@@ -138,8 +138,13 @@ def decode(d, opt={}):
                 return newobj;
             elif('_ArrayData_' in d):
                 newobj=np.asarray(d['_ArrayData_'],dtype=np.dtype(d['_ArrayType_']));
+                print(d.keys())
+                if('_ArrayZipSize_' in d and newobj.shape[0]==1):
+                    newobj=newobj.reshape(d['_ArrayZipSize_']);
+                print(newobj.shape)
                 if('_ArrayIsComplex_' in d and newobj.shape[0]==2):
                     newobj=newobj[0]+1j*newobj[1];
+                print(newobj.shape)
                 newobj=newobj.reshape(d['_ArraySize_']);
                 return newobj;
             else:

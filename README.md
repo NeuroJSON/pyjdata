@@ -23,6 +23,28 @@ Optional Dependency (if reading or writing Binary JData/UBJSON files):
 * **bjdata**: PIP: run `pip install bjdata` see https://pypi.org/project/bjdata/
 * **numpy**: PIP: run `pip install numpy` or `sudo apt-get install python-numpy`
 
+Replacing `pip` by `pip3` if you are using Python 3.x. If either `pip` or `pip3` 
+does not exist on your system, please run
+```
+    sudo apt-get python-pip python3-pip
+```
+
+One can also install this module from the source code. To do this, you first
+check out a copy of the latest code from Github by
+```
+    git clone https://github.com/fangq/pyjdata.git
+    cd pyjdata
+```
+then install the module to your local user folder by
+```
+    python setup.py install --user
+```
+or, if you prefer, install to the system folder for all users by
+```
+    sudo python setup.py install
+```
+Please replace `python` by `python3` if you want to install it for Python 3.x instead of 2.x.
+
 ## How to use
 
 The PyJData module is easy to use. You can use the `encode()/decode()` functions to
