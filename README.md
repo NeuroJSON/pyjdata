@@ -1,8 +1,8 @@
 # JData for Python - a lightweight and portable data annotation method
 
-- Copyright: (C) Qianqian Fang (2019) <q.fang at neu.edu>
+- Copyright: (C) Qianqian Fang (2019-2020) <q.fang at neu.edu>
 - License: Apache License, Version 2.0
-- Version: 0.2
+- Version: 0.3.5
 - URL: https://github.com/fangq/pyjdata
 
 
