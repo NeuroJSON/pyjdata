@@ -71,7 +71,8 @@ def loadt(fname, opt={}, **kwargs):
     kwargs.setdefault('strict',False);
     kwargs.setdefault('object_pairs_hook',OrderedDict);
     opt.setdefault('decode',True);
-    
+    opt['base64']=True;
+
     with open(fname, "r") as fid:
         data=json.load(fid, **kwargs);
 
@@ -127,6 +128,7 @@ def loadb(fname, opt={}, **kwargs):
     @param[in] opt: options, if opt['decode']=True or 1 (default), call jdata.decode() before saving
     """
     opt.setdefault('decode',True)
+    opt['base64']=False;
 
     try:
         import bjdata

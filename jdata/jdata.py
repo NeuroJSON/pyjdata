@@ -83,10 +83,10 @@ def encode(d, opt={}):
                 if(opt['compression']=='zlib'):
                     newobj['_ArrayZipData_']=zlib.compress(newobj['_ArrayZipData_']);
                 elif(opt['compression']=='gzip'):
-                    newobj['_ArrayZipData_']=zlib.compress(newobj['_ArrayZipData_'],16+zlib.MAX_WBITS);
+                    newobj['_ArrayZipData_']=zlib.compress(newobj['_ArrayZipData_'],zlib.MAX_WBITS|32);
                 elif(opt['compression']=='lzma'):
                     newobj['_ArrayZipData_']=lzma.compress(newobj['_ArrayZipData_'],lzma.FORMAT_ALONE);
-                if(not ('base64' in opt and not(opt['base64']))):
+                if(('base64' in opt) and (opt['base64'])):
                     newobj['_ArrayZipData_']=base64.b64encode(newobj['_ArrayZipData_']);
                 newobj.pop('_ArrayData_');
         return newobj;
@@ -119,32 +119,36 @@ def decode(d, opt={}):
         return decodelist(d,opt);
     elif isinstance(d, dict):
         if('_ArrayType_' in d):
+            if(isinstance(d['_ArraySize_'],str)):
+                d['_ArraySize_']=np.array(bytearray(d['_ArraySize_']));
             if('_ArrayZipData_' in d):
                 newobj=d['_ArrayZipData_']
-                if(not ('base64' in opt and not(opt['base64']))):
+                if(('base64' in opt) and (opt['base64'])):
                     newobj=base64.b64decode(newobj)
                 if('_ArrayZipType_' in d and d['_ArrayZipType_'] not in _zipper):
                     raise Exception('JData', 'compression method is not supported')
                 if(d['_ArrayZipType_']=='zlib'):
-                    newobj=zlib.decompress(newobj)
+                    newobj=zlib.decompress(bytes(newobj))
                 elif(d['_ArrayZipType_']=='gzip'):
-                    newobj=zlib.decompress(newobj,16+zlib.MAX_WBITS)
+                    newobj=zlib.decompress(bytes(newobj),zlib.MAX_WBITS|32)
                 elif(d['_ArrayZipType_']=='lzma'):
-                    newobj=lzma.decompress(newobj,lzma.FORMAT_ALONE)
+                    newobj=lzma.decompress(bytes(newobj),lzma.FORMAT_ALONE)
                 newobj=np.fromstring(newobj,dtype=np.dtype(d['_ArrayType_'])).reshape(d['_ArrayZipSize_']);
                 if('_ArrayIsComplex_' in d and newobj.shape[0]==2):
                     newobj=newobj[0]+1j*newobj[1];
-                newobj=newobj.reshape(d['_ArraySize_']);
+                newobj=newobj.reshape(list(d['_ArraySize_']));
                 return newobj;
             elif('_ArrayData_' in d):
-                newobj=np.asarray(d['_ArrayData_'],dtype=np.dtype(d['_ArrayType_']));
-                print(d.keys())
+                if(isinstance(d['_ArrayData_'],str)):
+                    newobj=np.frombuffer(d['_ArrayData_'],dtype=np.dtype(d['_ArrayType_']));
+                else:
+                    newobj=np.asarray(d['_ArrayData_'],dtype=np.dtype(d['_ArrayType_']));
                 if('_ArrayZipSize_' in d and newobj.shape[0]==1):
+                    if(isinstance(d['_ArrayZipSize_'],str)):
+                        d['_ArrayZipSize_']=np.array(bytearray(d['_ArrayZipSize_']));
                     newobj=newobj.reshape(d['_ArrayZipSize_']);
-                print(newobj.shape)
                 if('_ArrayIsComplex_' in d and newobj.shape[0]==2):
                     newobj=newobj[0]+1j*newobj[1];
-                print(newobj.shape)
                 newobj=newobj.reshape(d['_ArraySize_']);
                 return newobj;
             else:
