@@ -26,7 +26,7 @@ Optional Dependency (if reading or writing Binary JData/UBJSON files):
 Replacing `pip` by `pip3` if you are using Python 3.x. If either `pip` or `pip3` 
 does not exist on your system, please run
 ```
-    sudo apt-get python-pip python3-pip
+    sudo apt-get install python-pip python3-pip
 ```
 
 One can also install this module from the source code. To do this, you first
