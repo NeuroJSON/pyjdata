@@ -21,5 +21,5 @@ addons:
     update: true
 
 script:
-  - python -m unittest discover 
+  - python -m unittest discover -v test
   - python setup.py sdist
