@@ -177,7 +177,7 @@ def jsonfilter(obj):
 
 def encodedict(d0, opt={}):
     d=dict(d0);
-    for k, v in d.items():
+    for k, v in d0.items():
         newkey=encode(k,opt)
         d[newkey]=encode(v,opt);
         if(k!=newkey):
