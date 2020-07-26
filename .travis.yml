@@ -1,0 +1,25 @@
+os:
+  - linux
+
+language:
+  -python
+
+jobs:
+  include:
+    - python: 2.7
+    - python: 3.8
+    - python: 3.6
+
+before_install:
+  - if [ "$TRAVIS_OS_NAME" = "linux" ]; then sudo apt-get install python-numpy python3-numpy; fi
+
+addons:
+  apt:
+    packages:
+    - python3-numpy
+    - python-numpy
+    update: true
+
+script:
+  - python -m unittest discover 
+  - python setup.py sdist
