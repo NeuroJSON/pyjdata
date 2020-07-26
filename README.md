@@ -2,9 +2,10 @@
 
 - Copyright: (C) Qianqian Fang (2019-2020) <q.fang at neu.edu>
 - License: Apache License, Version 2.0
-- Version: 0.3.5
+- Version: 0.3.6
 - URL: https://github.com/fangq/pyjdata
 
+[![Build Status](https://travis-ci.com/fangq/pyjdata.svg?branch=master)](https://travis-ci.com/fangq/pyjdata)
 
 The [JData Specification](https://github.com/fangq/jdata/) defines a lightweight 
 language-independent data annotation interface targetted at
@@ -19,9 +20,18 @@ programs of different languages.
 * Github: download from https://github.com/fangq/pyjdata
 * PIP: run `pip install jdata` see https://pypi.org/project/jdata/
 
-Optional Dependency (if reading or writing Binary JData/UBJSON files):
+This package can also be installed on Ubuntu (Debian package is currently under
+review) via
+```
+sudo add-apt-repository ppa:fangq/ppa
+sudo apt-get update
+sudo apt-get install python-jdata python3-jdata
+```
+
+Dependencies:
 * **bjdata**: PIP: run `pip install bjdata` see https://pypi.org/project/bjdata/
 * **numpy**: PIP: run `pip install numpy` or `sudo apt-get install python-numpy`
+* **backports.lzma**: PIP: run `pip install backports.lzma` (needed for Python 2.7)
 
 Replacing `pip` by `pip3` if you are using Python 3.x. If either `pip` or `pip3` 
 does not exist on your system, please run
@@ -74,5 +84,8 @@ newdata=jd.load('test.json')
 newdata
 ```
 
+To see additional data type support, please run the built-in test using below command
 
-
+```
+python -m unittest discover -v test
+```
