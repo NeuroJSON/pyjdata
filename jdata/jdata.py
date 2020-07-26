@@ -14,8 +14,12 @@ __all__ = ['encode','decode','jdtype','jsonfilter']
 import numpy as np
 import copy
 import zlib
-import lzma
 import base64
+
+try:
+    import lzma
+except ImportError:
+    from backports import lzma
 
 ##====================================================================================
 ## global variables
