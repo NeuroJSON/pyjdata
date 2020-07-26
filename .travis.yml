@@ -2,7 +2,7 @@ os:
   - linux
 
 language:
-  -python
+  - python
 
 jobs:
   include:
