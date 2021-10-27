@@ -173,6 +173,8 @@ def jsonfilter(obj):
             return obj.tolist()
         else:
             return obj.item()
+    elif isinstance(obj, (bytes, bytearray)):
+        return obj.decode("utf-8")
     elif isinstance(obj, float):
         if(np.isnan(obj)):
             return '_NaN_';
