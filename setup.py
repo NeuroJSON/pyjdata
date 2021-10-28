@@ -6,7 +6,7 @@ with open("README.md", "r") as fh:
 setup(
   name = 'jdata',
   packages = ['jdata'],
-  version = '0.3.6',
+  version = '0.3.7',
   license='Apache license 2.0',
   description = 'Encoding and decoding Python data structrues using portable JData-annotated formats',
   long_description=readme,
@@ -15,7 +15,7 @@ setup(
   author_email = 'fangqq@gmail.com',
   maintainer= 'Qianqian Fang',
   url = 'https://github.com/fangq/pyjdata',
-  download_url = 'https://github.com/fangq/pyjdata/archive/v0.3.5.tar.gz',
+  download_url = 'https://github.com/fangq/pyjdata/archive/v0.3.7.tar.gz',
   keywords = ['JSON', 'JData', 'UBJSON', 'OpenJData', 'NeuroJData', 'JNIfTI', 'Encoder', 'Decoder'],
   platforms="any",
   install_requires=[

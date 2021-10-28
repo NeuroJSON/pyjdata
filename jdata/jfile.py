@@ -1,7 +1,7 @@
 """@package docstring
 File IO to load/decode JData-based files to Python data or encode/save Python data to JData files
 
-Copyright (c) 2019 Qianqian Fang <q.fang at neu.edu>
+Copyright (c) 2019-2021 Qianqian Fang <q.fang at neu.edu>
 """
 
 __all__ = ['load','save','show','loadt','savet','loadb','saveb','jext']
@@ -39,7 +39,7 @@ def load(fname, opt={}, **kwargs):
     elif(ext in jext['b']):
         return loadb(fname, opt, **kwargs);
     else:
-        raise Exception('JData', 'file extension is not recognized, accept (.json,.jdat,.jbat,.jnii,.bnii,.jmsh,.bmsh)')
+        raise Exception('JData', 'file extension is not recognized, accept (' + ','.join(jext['t']) + ';' + ','.join(jext['b']) +')')
 
 def save(data, fname, opt={}, **kwargs):
     """@brief Saving Python data to file (binary or text) according to the file extension
@@ -56,7 +56,7 @@ def save(data, fname, opt={}, **kwargs):
     elif(ext in jext['b']):
         saveb(data, fname, opt, **kwargs);
     else:
-        raise Exception('JData', 'file extension is not recognized, accept (.json,.jdat,.jbat,.jnii,.bnii,.jmsh,.bmsh)')
+        raise Exception('JData', 'file extension is not recognized, accept (' + ','.join(jext['t']) + ';' + ','.join(jext['b']) +')')
 
 ##====================================================================================
 ## Loading and saving text-based JData (i.e. JSON) files
@@ -106,6 +106,7 @@ def show(data, opt={}, **kwargs):
     kwargs.setdefault('default',jd.jsonfilter);
     opt.setdefault('string',False);
     opt.setdefault('encode',True);
+    opt['base64']=True;
 
     if(opt['encode']):
         data=jd.encode(data,opt);

@@ -1,8 +1,8 @@
 # JData for Python - a lightweight and portable data annotation method
 
-- Copyright: (C) Qianqian Fang (2019-2020) <q.fang at neu.edu>
+- Copyright: (C) Qianqian Fang (2019-2021) <q.fang at neu.edu>
 - License: Apache License, Version 2.0
-- Version: 0.3.6
+- Version: 0.3.7
 - URL: https://github.com/fangq/pyjdata
 
 [![Build Status](https://travis-ci.com/fangq/pyjdata.svg?branch=master)](https://travis-ci.com/fangq/pyjdata)
@@ -20,24 +20,30 @@ programs of different languages.
 * Github: download from https://github.com/fangq/pyjdata
 * PIP: run `pip install jdata` see https://pypi.org/project/jdata/
 
-This package can also be installed on Ubuntu (Debian package is currently under
-review) via
+This package can also be installed on Ubuntu 21.04 or Debian Bullseye via
+```
+sudo apt-get install python3-jdata
+```
+
+On older Ubuntu or Debian releases, you may install jdata via the below PPA:
 ```
 sudo add-apt-repository ppa:fangq/ppa
 sudo apt-get update
-sudo apt-get install python-jdata python3-jdata
+sudo apt-get install python3-jdata
 ```
 
 Dependencies:
 * **bjdata**: PIP: run `pip install bjdata` see https://pypi.org/project/bjdata/
 * **numpy**: PIP: run `pip install numpy` or `sudo apt-get install python-numpy`
-* **backports.lzma**: PIP: run `pip install backports.lzma` (needed for Python 2.7)
+* **backports.lzma**: PIP: run `sudo apt-get install liblzma-dev` and `pip install backports.lzma` (needed for Python 2.7)
 
 Replacing `pip` by `pip3` if you are using Python 3.x. If either `pip` or `pip3` 
 does not exist on your system, please run
 ```
-    sudo apt-get install python-pip python3-pip
+    sudo apt-get install python3-pip
 ```
+Please note that in some OS releases (such as Ubuntu 20.04), python2.x and python-pip 
+are no longer supported.
 
 One can also install this module from the source code. To do this, you first
 check out a copy of the latest code from Github by
@@ -47,13 +53,19 @@ check out a copy of the latest code from Github by
 ```
 then install the module to your local user folder by
 ```
-    python setup.py install --user
+    python3 setup.py install --user
 ```
 or, if you prefer, install to the system folder for all users by
 ```
-    sudo python setup.py install
+    sudo python3 setup.py install
 ```
 Please replace `python` by `python3` if you want to install it for Python 3.x instead of 2.x.
+
+Instead of installing the module, you can also import the jdata module directly from 
+your local copy by cd the root folder of the unzipped pyjdata package, and run
+```
+   import jdata as jd
+```
 
 ## How to use
 
@@ -87,5 +99,5 @@ newdata
 To see additional data type support, please run the built-in test using below command
 
 ```
-python -m unittest discover -v test
+python3 -m unittest discover -v test
 ```

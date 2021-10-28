@@ -32,7 +32,8 @@ complex-valued data are reflected in the doubled data size
 jdtype={'float32':'single','float64':'double','float_':'double',
 'bool':'uint8','byte':'int8','short':'int16','ubyte':'uint8',
 'ushort':'uint16','int_':'int32','uint':'uint32','complex_':'double','complex128':'double',
-'longlong':'int64','ulonglong':'uint64','csingle':'single','cdouble':'double'};
+'complex64':'single','longlong':'int64','ulonglong':'uint64',
+'csingle':'single','cdouble':'double'};
 
 _zipper=['zlib','gzip','lzma'];
 
