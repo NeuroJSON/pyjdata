@@ -141,7 +141,10 @@ def decode(d, opt={}):
                 newobj=np.fromstring(newobj,dtype=np.dtype(d['_ArrayType_'])).reshape(d['_ArrayZipSize_']);
                 if('_ArrayIsComplex_' in d and newobj.shape[0]==2):
                     newobj=newobj[0]+1j*newobj[1];
-                newobj=newobj.reshape(list(d['_ArraySize_']));
+                if('_ArrayOrder_' in d and d['_ArrayOrder_'].lower()=='c' or d['_ArrayOrder_'].lower()=='col' or d['_ArrayOrder_'].lower()=='column'):
+                    newobj=newobj.reshape(list(d['_ArraySize_']),order='F')
+                else:
+                    newobj=newobj.reshape(list(d['_ArraySize_']))
                 return newobj;
             elif('_ArrayData_' in d):
                 if(isinstance(d['_ArrayData_'],str)):
@@ -154,7 +157,10 @@ def decode(d, opt={}):
                     newobj=newobj.reshape(d['_ArrayZipSize_']);
                 if('_ArrayIsComplex_' in d and newobj.shape[0]==2):
                     newobj=newobj[0]+1j*newobj[1];
-                newobj=newobj.reshape(d['_ArraySize_']);
+                if('_ArrayOrder_' in d and d['_ArrayOrder_'].lower()=='c' or d['_ArrayOrder_'].lower()=='col' or d['_ArrayOrder_'].lower()=='column'):
+                    newobj=newobj.reshape(list(d['_ArraySize_']),order='F')
+                else:
+                    newobj=newobj.reshape(list(d['_ArraySize_']))
                 return newobj;
             else:
                 raise Exception('JData', 'one and only one of _ArrayData_ or _ArrayZipData_ is required')
