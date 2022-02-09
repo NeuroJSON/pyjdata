@@ -2,8 +2,14 @@
 
 To run the test, please run
 
+   python3 -m unittest discover -v test
+
+or
+
    import testjd
    testjd.run()
+
+in the root folder.
 
 Copyright (c) 2019 Qianqian Fang <q.fang at neu.edu>
 """
@@ -12,12 +18,11 @@ import unittest
 
 import jdata as jd
 import numpy as np
-import collections
-import json
+from collections import OrderedDict
  
 class TestModule(unittest.TestCase):
     def test_module(self):
-        data=collections.OrderedDict();
+        data=OrderedDict();
         data['const']=[2.0, 1, True, False, None, float('nan'), float('-inf')];
         data['shortarray']=[1,2,3];
         data['a_complex']=1+2.0j;

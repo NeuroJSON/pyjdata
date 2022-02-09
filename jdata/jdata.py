@@ -47,7 +47,7 @@ def encode(d, opt={}):
     This function converts complex data types (usually not JSON-serializable) into
     portable JData-annotated dict/list constructs that can be easily exported as JSON/JData
     files
-    
+
     @param[in,out] d: an arbitrary Python data
     @param[in] opt: options, can contain 'compression'=['zlib','lzma','gzip'] for data compression
     """
@@ -107,7 +107,7 @@ def decode(d, opt={}):
     
     This function converts portable JData-annotated dict/list constructs back to native Python
     data structures
-    
+
     @param[in,out] d: an arbitrary Python data, any JData-encoded components will be decoded
     @param[in] opt: options
     """
@@ -142,9 +142,9 @@ def decode(d, opt={}):
                 if('_ArrayIsComplex_' in d and newobj.shape[0]==2):
                     newobj=newobj[0]+1j*newobj[1];
                 if('_ArrayOrder_' in d and (d['_ArrayOrder_'].lower()=='c' or d['_ArrayOrder_'].lower()=='col' or d['_ArrayOrder_'].lower()=='column')):
-                    newobj=newobj.reshape(list(d['_ArraySize_']),order='F')
+                    newobj=newobj.reshape(d['_ArraySize_'],order='F')
                 else:
-                    newobj=newobj.reshape(list(d['_ArraySize_']))
+                    newobj=newobj.reshape(d['_ArraySize_'])
                 return newobj;
             elif('_ArrayData_' in d):
                 if(isinstance(d['_ArrayData_'],str)):
@@ -158,9 +158,9 @@ def decode(d, opt={}):
                 if('_ArrayIsComplex_' in d and newobj.shape[0]==2):
                     newobj=newobj[0]+1j*newobj[1];
                 if('_ArrayOrder_' in d and (d['_ArrayOrder_'].lower()=='c' or d['_ArrayOrder_'].lower()=='col' or d['_ArrayOrder_'].lower()=='column')):
-                    newobj=newobj.reshape(list(d['_ArraySize_']),order='F')
+                    newobj=newobj.reshape(d['_ArraySize_'],order='F')
                 else:
-                    newobj=newobj.reshape(list(d['_ArraySize_']))
+                    newobj=newobj.reshape(d['_ArraySize_'])
                 return newobj;
             else:
                 raise Exception('JData', 'one and only one of _ArrayData_ or _ArrayZipData_ is required')

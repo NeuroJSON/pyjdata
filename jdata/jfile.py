@@ -51,6 +51,9 @@ def save(data, fname, opt={}, **kwargs):
     spl = os.path.splitext(fname)
     ext = spl[1].lower()
 
+    if(ext=='ubj'):
+        kwargs.setdefault('islittle',False);
+
     if(ext in jext['t']):
         savet(data, fname, opt, **kwargs);
     elif(ext in jext['b']):
