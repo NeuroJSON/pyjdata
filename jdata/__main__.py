@@ -22,11 +22,11 @@ def main():
     #
 
     parser = argparse.ArgumentParser(
-        description='Convert a text JData file to a binary JData file and vice versa.')
+        description='Convert a text JSON/JData file to a binary JSON/JData file and vice versa.')
 
     parser.add_argument(
         'file', nargs='+',
-        help='path to a text-JData (.json, .jdt) file or a binary JData (.bjd, .jdb) file')
+        help='path to a text-JData (json/jdt/jnii/jmsh/jnirs) file or a binary JData (bjd/jdb/bnii/bmsh/bnirs) file')
     parser.add_argument(
         '-f', '--force', action='store_const', const=True,
         default=False, help='overwrite existing files when converting')
@@ -34,9 +34,7 @@ def main():
         '-r', '--remove_input', action='store_const', const=True,
         default=False, help='delete the input file name after conversion')
     parser.add_argument(
-        '-c', '--compression', default='', help='compress large records')
-    parser.add_argument(
-        '-n', '--compressarraysize', default=100, help='compress large records')
+        '-c', '--compression', default="", help='set compression method (zlib,gzip,lzma,lz4)')
 
     args = parser.parse_args()
 

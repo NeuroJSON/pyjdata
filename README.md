@@ -33,7 +33,7 @@ sudo apt-get install python3-jdata
 ```
 
 Dependencies:
-* **numpy**: PIP: run `pip install numpy` or `sudo apt-get install python-numpy`
+* **numpy**: PIP: run `pip install numpy` or `sudo apt-get install python3-numpy`
 * (optional) **bjdata**: PIP: run `pip install bjdata` or `sudo apt-get install python3-bjdata`, see https://pypi.org/project/bjdata/, only needed to read/write BJData/UBJSON files
 * (optional) **lz4**: PIP: run `pip install lz4`, only needed when encoding/decoding lz4-compressed data
 * (optional) **backports.lzma**: PIP: run `sudo apt-get install liblzma-dev` and `pip install backports.lzma` (needed for Python 2.7), only needed when encoding/decoding lzma-compressed data
@@ -77,8 +77,8 @@ native Python data, for example
 ```
 import jdata as jd
 import numpy as np
-a={'str':'test','num':1.2,'list':[1.1,[2.1]],'nan':float('nan'),'np':np.arange(1,5,dtype=np.uint8)}
 
+a={'str':'test','num':1.2,'list':[1.1,[2.1]],'nan':float('nan'),'np':np.arange(1,5,dtype=np.uint8)}
 jd.encode(a)
 jd.decode(jd.encode(a))
 d1=jd.encode(a,{'compression':'zlib','base64':1})
