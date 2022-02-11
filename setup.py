@@ -6,7 +6,7 @@ with open("README.md", "r") as fh:
 setup(
   name = 'jdata',
   packages = ['jdata'],
-  version = '0.3.7',
+  version = '0.4.0',
   license='Apache license 2.0',
   description = 'Encoding and decoding Python data structrues using portable JData-annotated formats',
   long_description=readme,
@@ -15,13 +15,14 @@ setup(
   author_email = 'fangqq@gmail.com',
   maintainer= 'Qianqian Fang',
   url = 'https://github.com/fangq/pyjdata',
-  download_url = 'https://github.com/fangq/pyjdata/archive/v0.3.7.tar.gz',
-  keywords = ['JSON', 'JData', 'UBJSON', 'OpenJData', 'NeuroJData', 'JNIfTI', 'Encoder', 'Decoder'],
+  download_url = 'https://github.com/fangq/pyjdata/archive/v0.4.0.tar.gz',
+  keywords = ['JSON', 'JData', 'UBJSON', 'BJData', 'OpenJData', 'NeuroJSON', 'JNIfTI', 'JMesh', 'Encoder', 'Decoder'],
   platforms="any",
   install_requires=[
+        'numpy>=1.8.0'
       ],
   classifiers=[
-    'Development Status :: 3 - Alpha',
+    'Development Status :: 4 - Beta',
     'Intended Audience :: Developers',
     'Topic :: Software Development :: Build Tools',
     'License :: OSI Approved :: Apache Software License',
@@ -29,6 +30,10 @@ setup(
     'Programming Language :: Python :: 3',
     'Programming Language :: Python :: 3.4',
     'Programming Language :: Python :: 3.5',
-    'Programming Language :: Python :: 3.6'
+    'Programming Language :: Python :: 3.6',
+    'Programming Language :: Python :: 3.7',
+    'Programming Language :: Python :: 3.8',
+    'Topic :: Software Development :: Libraries',
+    'Topic :: Software Development :: Libraries :: Python Modules'
   ]
 )
