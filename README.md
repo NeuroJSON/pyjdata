@@ -1,8 +1,8 @@
 # JData for Python - a lightweight and portable data annotation method
 
-- Copyright: (C) Qianqian Fang (2019-2021) <q.fang at neu.edu>
+- Copyright: (C) Qianqian Fang (2019-2022) <q.fang at neu.edu>
 - License: Apache License, Version 2.0
-- Version: 0.3.7
+- Version: 0.4.0
 - URL: https://github.com/fangq/pyjdata
 
 [![Build Status](https://travis-ci.com/fangq/pyjdata.svg?branch=master)](https://travis-ci.com/fangq/pyjdata)
@@ -33,9 +33,10 @@ sudo apt-get install python3-jdata
 ```
 
 Dependencies:
-* **bjdata**: PIP: run `pip install bjdata` see https://pypi.org/project/bjdata/
 * **numpy**: PIP: run `pip install numpy` or `sudo apt-get install python-numpy`
-* **backports.lzma**: PIP: run `sudo apt-get install liblzma-dev` and `pip install backports.lzma` (needed for Python 2.7)
+* (optional) **bjdata**: PIP: run `pip install bjdata` or `sudo apt-get install python3-bjdata`, see https://pypi.org/project/bjdata/, only needed to read/write BJData/UBJSON files
+* (optional) **lz4**: PIP: run `pip install lz4`, only needed when encoding/decoding lz4-compressed data
+* (optional) **backports.lzma**: PIP: run `sudo apt-get install liblzma-dev` and `pip install backports.lzma` (needed for Python 2.7), only needed when encoding/decoding lzma-compressed data
 
 Replacing `pip` by `pip3` if you are using Python 3.x. If either `pip` or `pip3` 
 does not exist on your system, please run
@@ -77,6 +78,7 @@ native Python data, for example
 import jdata as jd
 import numpy as np
 a={'str':'test','num':1.2,'list':[1.1,[2.1]],'nan':float('nan'),'np':np.arange(1,5,dtype=np.uint8)}
+
 jd.encode(a)
 jd.decode(jd.encode(a))
 d1=jd.encode(a,{'compression':'zlib','base64':1})
@@ -90,11 +92,24 @@ the `jdata.save` function, or loading JData-formatted data to Python using `jdat
 ```
 import jdata as jd
 import numpy as np
+
 a={'str':'test','num':1.2,'list':[1.1,[2.1]],'nan':float('nan'),'np':np.arange(1,5,dtype=np.uint8)}
 jd.save(a,'test.json')
 newdata=jd.load('test.json')
 newdata
 ```
+
+## Utility
+
+One can convert from JSON based data files (`.json, .jdt, .jnii, .jmsh, .jnirs`) to binary-JData
+based binary files (`.bjd, .jdb, .bnii, .bmsh, .bnirs`) and vice versa using command
+```
+python3 -mjdata /path/to/text/json/file.json # convert to /path/to/text/json/file.jdb
+python3 -mjdata /path/to/text/json/file.jdb  # convert to /path/to/text/json/file.json
+python3 -mjdata -h                           # show help info
+```
+
+## Test
 
 To see additional data type support, please run the built-in test using below command
 

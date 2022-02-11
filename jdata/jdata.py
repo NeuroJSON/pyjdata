@@ -1,8 +1,8 @@
 """@package docstring
-Encoding and decoding python native data structures as 
+Encoding and decoding python native data structures as
 portable JData-spec annotated dict structure
 
-Copyright (c) 2019 Qianqian Fang <q.fang at neu.edu>
+Copyright (c) 2019-2022 Qianqian Fang <q.fang at neu.edu>
 """
 
 __all__ = ['encode','decode','jdtype','jsonfilter']
@@ -15,11 +15,6 @@ import numpy as np
 import copy
 import zlib
 import base64
-
-try:
-    import lzma
-except ImportError:
-    from backports import lzma
 
 ##====================================================================================
 ## global variables
@@ -35,7 +30,7 @@ jdtype={'float32':'single','float64':'double','float_':'double',
 'complex64':'single','longlong':'int64','ulonglong':'uint64',
 'csingle':'single','cdouble':'double'};
 
-_zipper=['zlib','gzip','lzma'];
+_zipper=['zlib','gzip','lzma','lz4','base64'];
 
 ##====================================================================================
 ## Python to JData encoding function
@@ -43,7 +38,7 @@ _zipper=['zlib','gzip','lzma'];
 
 def encode(d, opt={}):
     """@brief Encoding a Python data structure to portable JData-annotated dict constructs
-    
+
     This function converts complex data types (usually not JSON-serializable) into
     portable JData-annotated dict/list constructs that can be easily exported as JSON/JData
     files
@@ -51,6 +46,21 @@ def encode(d, opt={}):
     @param[in,out] d: an arbitrary Python data
     @param[in] opt: options, can contain 'compression'=['zlib','lzma','gzip'] for data compression
     """
+    if('compression' in opt):
+        if(opt['compression']=='lzma'):
+            try:
+                try:
+                    import lzma
+                except ImportError:
+                    from backports import lzma
+            except Exception:
+                raise Exception('JData', 'you must install "lzma" module to compress with this format')
+        elif(opt['compression']=='lz4'):
+            try:
+                import lz4.frame
+            except ImportError:
+                raise Exception('JData', 'you must install "lz4" module to compress with this format')
+
     if isinstance(d, float):
         if(np.isnan(d)):
             return '_NaN_';
@@ -90,8 +100,23 @@ def encode(d, opt={}):
                 elif(opt['compression']=='gzip'):
                     newobj['_ArrayZipData_']=zlib.compress(newobj['_ArrayZipData_'],zlib.MAX_WBITS|32);
                 elif(opt['compression']=='lzma'):
-                    newobj['_ArrayZipData_']=lzma.compress(newobj['_ArrayZipData_'],lzma.FORMAT_ALONE);
-                if(('base64' in opt) and (opt['base64'])):
+                    try:
+                        try:
+                            import lzma
+                        except ImportError:
+                            from backports import lzma
+                        newobj['_ArrayZipData_']=lzma.compress(newobj['_ArrayZipData_'],lzma.FORMAT_ALONE);
+                    except Exception:
+                        print('you must install "lzma" module to compress with this format, ignoring')
+                        pass
+                elif(opt['compression']=='lz4'):
+                    try:
+                        import lz4.frame
+                        newobj['_ArrayZipData_']=lz4.frame.compress(newobj['_ArrayZipData_']);
+                    except ImportError:
+                        print('you must install "lz4" module to compress with this format, ignoring')
+                        pass
+                if(('base64' in opt) and (opt['base64'])) or opt['compression']=='base64':
                     newobj['_ArrayZipData_']=base64.b64encode(newobj['_ArrayZipData_']);
                 newobj.pop('_ArrayData_');
         return newobj;
@@ -104,14 +129,13 @@ def encode(d, opt={}):
 
 def decode(d, opt={}):
     """@brief Decoding a JData-annotated dict construct into native Python data
-    
+
     This function converts portable JData-annotated dict/list constructs back to native Python
     data structures
 
     @param[in,out] d: an arbitrary Python data, any JData-encoded components will be decoded
     @param[in] opt: options
     """
-
     if (isinstance(d, str) or type(d)=='unicode') and len(d)<=6 and len(d)>4 and d[-1]=='_':
         if(d=='_NaN_'):
             return float('nan');
@@ -128,7 +152,7 @@ def decode(d, opt={}):
                 d['_ArraySize_']=np.array(bytearray(d['_ArraySize_']));
             if('_ArrayZipData_' in d):
                 newobj=d['_ArrayZipData_']
-                if(('base64' in opt) and (opt['base64'])):
+                if(('base64' in opt) and (opt['base64'])) or ('_ArrayZipType_' in d and d['_ArrayZipType_']=='base64'):
                     newobj=base64.b64decode(newobj)
                 if('_ArrayZipType_' in d and d['_ArrayZipType_'] not in _zipper):
                     raise Exception('JData', 'compression method is not supported')
@@ -137,7 +161,23 @@ def decode(d, opt={}):
                 elif(d['_ArrayZipType_']=='gzip'):
                     newobj=zlib.decompress(bytes(newobj),zlib.MAX_WBITS|32)
                 elif(d['_ArrayZipType_']=='lzma'):
-                    newobj=lzma.decompress(bytes(newobj),lzma.FORMAT_ALONE)
+                    try:
+                        try:
+                            import lzma
+                        except ImportError:
+                            from backports import lzma
+                        newobj=lzma.decompress(bytes(newobj),lzma.FORMAT_ALONE)
+                    except Exception:
+                        print('you must install "lzma" module to decompress a data record in this file, ignoring')
+                        pass
+                elif(d['_ArrayZipType_']=='lz4'):
+                    try:
+                        import lz4.frame
+                        newobj=lz4.frame.decompress(bytes(newobj))
+                    except Exception:
+                        print('Warning: you must install "lz4" module to decompress a data record in this file, ignoring')
+                        pass
+
                 newobj=np.fromstring(newobj,dtype=np.dtype(d['_ArrayType_'])).reshape(d['_ArrayZipSize_']);
                 if('_ArrayIsComplex_' in d and newobj.shape[0]==2):
                     newobj=newobj[0]+1j*newobj[1];
@@ -174,7 +214,7 @@ def decode(d, opt={}):
 
 def jsonfilter(obj):
     if type(obj) == 'long':
-        return str(obj) 
+        return str(obj)
     elif type(obj).__module__ == np.__name__:
         if isinstance(obj, np.ndarray):
             return obj.tolist()

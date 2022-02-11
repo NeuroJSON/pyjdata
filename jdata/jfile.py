@@ -1,7 +1,7 @@
 """@package docstring
 File IO to load/decode JData-based files to Python data or encode/save Python data to JData files
 
-Copyright (c) 2019-2021 Qianqian Fang <q.fang at neu.edu>
+Copyright (c) 2019-2022 Qianqian Fang <q.fang at neu.edu>
 """
 
 __all__ = ['load','save','show','loadt','savet','loadb','saveb','jext']
@@ -27,7 +27,7 @@ jext={'t':['.json','.jdt','.jdat','.jnii','.jmsh','.jnirs'], 'b':['.ubj','.bjd',
 
 def load(fname, opt={}, **kwargs):
     """@brief Loading a JData file (binary or text) according to the file extension
-    
+
     @param[in] fname: a JData file name (accept .json,.jdat,.jbat,.jnii,.bnii,.jmsh,.bmsh)
     @param[in] opt: options, if opt['decode']=True or 1 (default), call jdata.decode() after loading
     """
@@ -43,7 +43,7 @@ def load(fname, opt={}, **kwargs):
 
 def save(data, fname, opt={}, **kwargs):
     """@brief Saving Python data to file (binary or text) according to the file extension
-    
+
     @param[in] data: data to be saved
     @param[in] fname: a JData file name
     @param[in] opt: options, if opt['encode']=True or 1 (default), call jdata.encode() before saving
@@ -67,7 +67,7 @@ def save(data, fname, opt={}, **kwargs):
 
 def loadt(fname, opt={}, **kwargs):
     """@brief Loading a text-based (JSON) JData file and decode it to native Python data
-    
+
     @param[in] fname: a text JData (JSON based) file name
     @param[in] opt: options, if opt['decode']=True or 1 (default), call jdata.decode() after loading
     """
@@ -85,13 +85,14 @@ def loadt(fname, opt={}, **kwargs):
 
 def savet(data, fname, opt={}, **kwargs):
     """@brief Saving a Python data structure to a text-based JData (JSON) file
-    
+
     @param[in] data: data to be saved
     @param[in] fname: a text JData (JSON based) file name
     @param[in] opt: options, if opt['encode']=True or 1 (default), call jdata.encode() before saving
     """
     kwargs.setdefault('default',jd.jsonfilter);
     opt.setdefault('encode',True);
+    opt['base64']=True;
 
     if(opt['encode']):
         data=jd.encode(data,opt);
@@ -101,7 +102,7 @@ def savet(data, fname, opt={}, **kwargs):
 
 def show(data, opt={}, **kwargs):
     """@brief Printing a python data as JSON string or return the JSON string (opt['string']=True)
-    
+
     @param[in] data: data to be saved
     @param[in] opt: options, if opt['encode']=True or 1 (default), call jdata.encode() before printing
     """
