@@ -1,4 +1,6 @@
-# JData for Python - a lightweight and portable data annotation method
+![](https://neurojson.org/wiki/upload/neurojson_banner_long.png)
+
+# JData for Python - lightweight and serializable data annotations for Python
 
 - Copyright: (C) Qianqian Fang (2019-2022) <q.fang at neu.edu>
 - License: Apache License, Version 2.0
