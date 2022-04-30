@@ -1,7 +1,7 @@
 """pyjdata - encode and decode Python data structrues using portable JData formats
 
-This module provides an encoder and a decoder to convert a python/numpy native 
-data structure into a JData-compatible structure, or decode JData constructs to 
+This module provides an encoder and a decoder to convert a python/numpy native
+data structure into a JData-compatible structure, or decode JData constructs to
 restore python native data.
 
     import jdata as jd
@@ -36,7 +36,7 @@ to restore the original data types
 from .jfile import load, save, show, loadt, savet, loadb, saveb, jext
 from .jdata import encode, decode, jdtype, jsonfilter
 
-__version__ = '0.4.0'
+__version__ = '0.4.1'
 __all__ = ['load','save','show','loadt', 'savet', 'loadb', 'saveb','encode', 'decode', 'jdtype','jsonfilter','jext']
 __license__ = """Apache license 2.0, Copyright (c) 2019-2022 Qianqian Fang"""
 

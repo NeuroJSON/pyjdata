@@ -162,14 +162,12 @@ def decode(d, opt={}):
                     newobj=zlib.decompress(bytes(newobj),zlib.MAX_WBITS|32)
                 elif(d['_ArrayZipType_']=='lzma'):
                     try:
-                        try:
-                            import lzma
-                        except ImportError:
-                            from backports import lzma
-                        newobj=lzma.decompress(bytes(newobj),lzma.FORMAT_ALONE)
-                    except Exception:
-                        print('you must install "lzma" module to decompress a data record in this file, ignoring')
-                        pass
+                        import lzma
+                    except ImportError:
+                        from backports import lzma
+                    buf=bytearray(newobj)  # set length to -1 (unknown) if EOF appears
+                    buf[5:13] = b'\xff\xff\xff\xff\xff\xff\xff\xff'
+                    newobj=lzma.decompress(buf,lzma.FORMAT_ALONE)
                 elif(d['_ArrayZipType_']=='lz4'):
                     try:
                         import lz4.frame
@@ -177,7 +175,6 @@ def decode(d, opt={}):
                     except Exception:
                         print('Warning: you must install "lz4" module to decompress a data record in this file, ignoring')
                         pass
-
                 newobj=np.fromstring(newobj,dtype=np.dtype(d['_ArrayType_'])).reshape(d['_ArrayZipSize_']);
                 if('_ArrayIsComplex_' in d and newobj.shape[0]==2):
                     newobj=newobj[0]+1j*newobj[1];
