@@ -185,8 +185,8 @@ def decode(d, opt={}):
                     newobj=newobj.reshape(d['_ArraySize_'],order='F')
                 else:
                     newobj=newobj.reshape(d['_ArraySize_'])
-                if(len(d['_ArraySize_']) == 1 and d['_ArraySize_'][0] == 1):
-                    newobj=np.asscalar(newobj);
+                if(d['_ArraySize_'] == 1):
+                    newobj=newobj.item();
                 return newobj;
             elif('_ArrayData_' in d):
                 if(isinstance(d['_ArrayData_'],str)):
@@ -204,7 +204,7 @@ def decode(d, opt={}):
                 else:
                     newobj=newobj.reshape(d['_ArraySize_'])
                 if(d['_ArraySize_'] == 1):
-                    newobj=np.asscalar(newobj);
+                    newobj=newobj.item();
                 return newobj;
             else:
                 raise Exception('JData', 'one and only one of _ArrayData_ or _ArrayZipData_ is required')
