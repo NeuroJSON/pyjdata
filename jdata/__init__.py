@@ -36,7 +36,7 @@ to restore the original data types
 from .jfile import load, save, show, loadt, savet, loadb, saveb, jext
 from .jdata import encode, decode, jdtype, jsonfilter
 
-__version__ = '0.4.2'
+__version__ = '0.4.3'
 __all__ = ['load','save','show','loadt', 'savet', 'loadb', 'saveb','encode', 'decode', 'jdtype','jsonfilter','jext']
 __license__ = """Apache license 2.0, Copyright (c) 2019-2022 Qianqian Fang"""
 
