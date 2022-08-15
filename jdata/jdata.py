@@ -79,10 +79,13 @@ def encode(d, opt={}):
             '_ArrayData_': [d.real, d.imag]
           };
         return newobj;
-    elif isinstance(d, np.ndarray):
+    elif type(d).__module__ == np.__name__:
         newobj={};
         newobj["_ArrayType_"]=jdtype[str(d.dtype)] if (str(d.dtype) in jdtype) else str(d.dtype);
-        newobj["_ArraySize_"]=list(d.shape);
+        if(np.isscalar(d)):
+            newobj["_ArraySize_"]=[1];
+        else:
+            newobj["_ArraySize_"]=list(d.shape);
         if(d.dtype==np.complex64 or d.dtype==np.complex128 or d.dtype==np.csingle or d.dtype==np.cdouble):
                 newobj['_ArrayIsComplex_']=True;
                 newobj['_ArrayData_']=[list(d.flatten().real), list(d.flatten().imag)];
@@ -182,6 +185,8 @@ def decode(d, opt={}):
                     newobj=newobj.reshape(d['_ArraySize_'],order='F')
                 else:
                     newobj=newobj.reshape(d['_ArraySize_'])
+                if(len(d['_ArraySize_']) == 1 and d['_ArraySize_'][0] == 1):
+                    newobj=np.asscalar(newobj);
                 return newobj;
             elif('_ArrayData_' in d):
                 if(isinstance(d['_ArrayData_'],str)):
@@ -198,6 +203,8 @@ def decode(d, opt={}):
                     newobj=newobj.reshape(d['_ArraySize_'],order='F')
                 else:
                     newobj=newobj.reshape(d['_ArraySize_'])
+                if(len(d['_ArraySize_']) == 1 and d['_ArraySize_'][0] == 1):
+                    newobj=np.asscalar(newobj);
                 return newobj;
             else:
                 raise Exception('JData', 'one and only one of _ArrayData_ or _ArrayZipData_ is required')
