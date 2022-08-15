@@ -5,11 +5,11 @@
 - Copyright: (C) Qianqian Fang (2019-2022) <q.fang at neu.edu>
 - License: Apache License, Version 2.0
 - Version: 0.4.2
-- URL: https://github.com/fangq/pyjdata
+- URL: https://github.com/NeuroJSON/pyjdata
 
 [![Build Status](https://travis-ci.com/fangq/pyjdata.svg?branch=master)](https://travis-ci.com/fangq/pyjdata)
 
-The [JData Specification](https://github.com/fangq/jdata/) defines a lightweight 
+The [JData Specification](https://github.com/NeuroJSON/jdata/) defines a lightweight 
 language-independent data annotation interface targetted at
 storing and sharing complex data structures across different programming
 languages such as MATLAB, JavaScript, Python etc. Using JData formats, a 
@@ -19,7 +19,7 @@ programs of different languages.
 
 ## How to install
 
-* Github: download from https://github.com/fangq/pyjdata
+* Github: download from https://github.com/NeuroJSON/pyjdata
 * PIP: run `pip install jdata` see https://pypi.org/project/jdata/
 
 This package can also be installed on Ubuntu 21.04 or Debian Bullseye via
@@ -51,7 +51,7 @@ are no longer supported.
 One can also install this module from the source code. To do this, you first
 check out a copy of the latest code from Github by
 ```
-    git clone https://github.com/fangq/pyjdata.git
+    git clone https://github.com/NeuroJSON/pyjdata.git
     cd pyjdata
 ```
 then install the module to your local user folder by
