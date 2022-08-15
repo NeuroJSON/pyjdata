@@ -79,11 +79,11 @@ def encode(d, opt={}):
             '_ArrayData_': [d.real, d.imag]
           };
         return newobj;
-    elif type(d).__module__ == np.__name__:
+    elif isinstance(d, np.ndarray) or np.iscomplex(d):
         newobj={};
         newobj["_ArrayType_"]=jdtype[str(d.dtype)] if (str(d.dtype) in jdtype) else str(d.dtype);
         if(np.isscalar(d)):
-            newobj["_ArraySize_"]=[1];
+            newobj["_ArraySize_"]=1;
         else:
             newobj["_ArraySize_"]=list(d.shape);
         if(d.dtype==np.complex64 or d.dtype==np.complex128 or d.dtype==np.csingle or d.dtype==np.cdouble):
@@ -203,7 +203,7 @@ def decode(d, opt={}):
                     newobj=newobj.reshape(d['_ArraySize_'],order='F')
                 else:
                     newobj=newobj.reshape(d['_ArraySize_'])
-                if(len(d['_ArraySize_']) == 1 and d['_ArraySize_'][0] == 1):
+                if(d['_ArraySize_'] == 1):
                     newobj=np.asscalar(newobj);
                 return newobj;
             else:
