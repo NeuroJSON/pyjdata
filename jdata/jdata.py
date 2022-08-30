@@ -28,9 +28,11 @@ jdtype={'float32':'single','float64':'double','float_':'double',
 'bool':'uint8','byte':'int8','short':'int16','ubyte':'uint8',
 'ushort':'uint16','int_':'int32','uint':'uint32','complex_':'double','complex128':'double',
 'complex64':'single','longlong':'int64','ulonglong':'uint64',
-'csingle':'single','cdouble':'double'};
+'csingle':'single','cdouble':'double'}
 
-_zipper=['zlib','gzip','lzma','lz4','blosc2blosclz','blosc2lz4','blosc2lz4hc','blosc2zlib','blosc2zstd','base64'];
+_zipper=('zlib','gzip','lzma','lz4','blosc2blosclz','blosc2lz4','blosc2lz4hc','blosc2zlib','blosc2zstd','base64')
+
+_allownumpy=('_ArraySize_','_ArrayData_','_ArrayZipSize_','_ArrayZipData_')
 
 ##====================================================================================
 ## Python to JData encoding function
@@ -44,7 +46,10 @@ def encode(d, opt={}):
     files
 
     @param[in,out] d: an arbitrary Python data
-    @param[in] opt: options, can contain 'compression'=['zlib','lzma','gzip'] for data compression
+    @param[in] opt: options, can contain a dict with 
+         'compression': choose one of ['zlib','lzma','gzip','lz4','blosc2blosclz','blosc2lz4',
+                        'blosc2lz4hc','blosc2zlib','blosc2zstd'] for compression codec, default is None
+         'nthread': number of compression thread of the codec is of the blosc2 class, default is 1
     """
     if('compression' in opt):
         if(opt['compression']=='lzma'):
@@ -93,16 +98,16 @@ def encode(d, opt={}):
             newobj["_ArraySize_"]=list(d.shape);
         if(d.dtype==np.complex64 or d.dtype==np.complex128 or d.dtype==np.csingle or d.dtype==np.cdouble):
                 newobj['_ArrayIsComplex_']=True;
-                newobj['_ArrayData_']=[list(d.flatten().real), list(d.flatten().imag)];
+                newobj['_ArrayData_']=np.stack(d.ravel().real, d.ravel().imag);
         else:
-                newobj["_ArrayData_"]=list(d.flatten());
+                newobj["_ArrayData_"]=d.ravel();
 
         if('compression' in opt):
                 if(opt['compression'] not in _zipper):
                     raise Exception('JData', 'compression method is not supported')
                 newobj['_ArrayZipType_']=opt['compression'];
                 newobj['_ArrayZipSize_']=[1+int('_ArrayIsComplex_' in newobj), d.size];
-                newobj['_ArrayZipData_']=np.asarray(newobj['_ArrayData_'],dtype=d.dtype).tostring();
+                newobj['_ArrayZipData_']=newobj["_ArrayData_"].data;
                 if(opt['compression']=='zlib'):
                     newobj['_ArrayZipData_']=zlib.compress(newobj['_ArrayZipData_']);
                 elif(opt['compression']=='gzip'):
@@ -115,7 +120,7 @@ def encode(d, opt={}):
                         pass
                 elif(opt['compression']=='lz4'):
                     try:
-                        newobj['_ArrayZipData_']=lz4.frame.compress(newobj['_ArrayZipData_']);
+                        newobj['_ArrayZipData_']=lz4.frame.compress(newobj['_ArrayZipData_'].tobytes());
                     except ImportError:
                         print('you must install "lz4" module to compress with this format, ignoring')
                         pass
@@ -129,7 +134,7 @@ def encode(d, opt={}):
                         blosc2nthread = 1
                         if('nthread' in opt):
                             blosc2nthread = opt['nthread']
-                        newobj['_ArrayZipData_']=blosc2.compress2(newobj['_ArrayZipData_'], compcode=BLOSC2CODEC[opt['compression']], typesize=d.dtype.itemsize, nthread=blosc2nthread)
+                        newobj['_ArrayZipData_']=blosc2.compress2(newobj['_ArrayZipData_'], compcode=BLOSC2CODEC[opt['compression']], typesize=d.dtype.itemsize, nthreads=blosc2nthread)
                     except ImportError:
                         print('you must install "blosc2" module to compress with this format, ignoring')
                         pass
@@ -166,7 +171,7 @@ def decode(d, opt={}):
     elif isinstance(d, dict):
         if('_ArrayType_' in d):
             if(isinstance(d['_ArraySize_'],str)):
-                d['_ArraySize_']=np.array(bytearray(d['_ArraySize_']));
+                d['_ArraySize_']=np.frombuffer(bytearray(d['_ArraySize_']));
             if('_ArrayZipData_' in d):
                 newobj=d['_ArrayZipData_']
                 if(('base64' in opt) and (opt['base64'])) or ('_ArrayZipType_' in d and d['_ArrayZipType_']=='base64'):
@@ -198,11 +203,11 @@ def decode(d, opt={}):
                         blosc2nthread = 1
                         if('nthread' in opt):
                             blosc2nthread = opt['nthread']
-                        newobj=blosc2.decompress2(bytes(newobj), as_bytearray=False, nthread=blosc2nthread)
+                        newobj=blosc2.decompress2(bytes(newobj), as_bytearray=False, nthreads=blosc2nthread)
                     except Exception:
                         print('Warning: you must install "blosc2" module to decompress a data record in this file, ignoring')
                         pass
-                newobj=np.fromstring(newobj,dtype=np.dtype(d['_ArrayType_'])).reshape(d['_ArrayZipSize_']);
+                newobj=np.frombuffer(newobj,dtype=np.dtype(d['_ArrayType_'])).reshape(d['_ArrayZipSize_']);
                 if('_ArrayIsComplex_' in d and newobj.shape[0]==2):
                     newobj=newobj[0]+1j*newobj[1];
                 if('_ArrayOrder_' in d and (d['_ArrayOrder_'].lower()=='c' or d['_ArrayOrder_'].lower()=='col' or d['_ArrayOrder_'].lower()=='column')):
@@ -219,7 +224,7 @@ def decode(d, opt={}):
                     newobj=np.asarray(d['_ArrayData_'],dtype=np.dtype(d['_ArrayType_']));
                 if('_ArrayZipSize_' in d and newobj.shape[0]==1):
                     if(isinstance(d['_ArrayZipSize_'],str)):
-                        d['_ArrayZipSize_']=np.array(bytearray(d['_ArrayZipSize_']));
+                        d['_ArrayZipSize_']=np.frombuffer(bytearray(d['_ArrayZipSize_']));
                     newobj=newobj.reshape(d['_ArrayZipSize_']);
                 if('_ArrayIsComplex_' in d and newobj.shape[0]==2):
                     newobj=newobj[0]+1j*newobj[1];
@@ -259,6 +264,8 @@ def jsonfilter(obj):
 def encodedict(d0, opt={}):
     d=dict(d0);
     for k, v in d0.items():
+        if isinstance(v, np.ndarray) and isinstance(k, str) and (k in _allownumpy):
+            continue
         newkey=encode(k,opt)
         d[newkey]=encode(v,opt);
         if(k!=newkey):
