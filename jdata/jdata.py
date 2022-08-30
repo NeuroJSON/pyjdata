@@ -249,7 +249,7 @@ def decode(d, opt={}):
                         newobj = lz4.frame.decompress(bytes(newobj))
                     except Exception:
                         print('Warning: you must install "lz4" module to decompress a data record in this file, ignoring')
-                        pass
+                        return copy.deepcopy(d)
                 elif d["_ArrayZipType_"].startswith("blosc2"):
                     try:
                         import blosc2
@@ -260,7 +260,7 @@ def decode(d, opt={}):
                         newobj = blosc2.decompress2(bytes(newobj), as_bytearray=False, nthreads=blosc2nthread)
                     except Exception:
                         print('Warning: you must install "blosc2" module to decompress a data record in this file, ignoring')
-                        pass
+                        return copy.deepcopy(d)
                 newobj = np.frombuffer(newobj, dtype=np.dtype(d["_ArrayType_"])).reshape(d["_ArrayZipSize_"])
                 if "_ArrayIsComplex_" in d and newobj.shape[0] == 2:
                     newobj = newobj[0] + 1j * newobj[1]
@@ -270,7 +270,7 @@ def decode(d, opt={}):
                     newobj = newobj.reshape(d["_ArraySize_"], order="F")
                 else:
                     newobj = newobj.reshape(d["_ArraySize_"])
-                if d["_ArraySize_"] == 1:
+                if not hasattr(d["_ArraySize_"], "__iter__") and d["_ArraySize_"] == 1:
                     newobj = newobj.item()
                 return newobj
             elif "_ArrayData_" in d:
@@ -290,7 +290,7 @@ def decode(d, opt={}):
                     newobj = newobj.reshape(d["_ArraySize_"], order="F")
                 else:
                     newobj = newobj.reshape(d["_ArraySize_"])
-                if d["_ArraySize_"] == 1:
+                if not hasattr(d["_ArraySize_"], "__iter__") and d["_ArraySize_"] == 1:
                     newobj = newobj.item()
                 return newobj
             else:
