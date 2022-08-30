@@ -149,7 +149,8 @@ def encode(d, opt={}):
             if opt["compression"] == "zlib":
                 newobj["_ArrayZipData_"] = zlib.compress(newobj["_ArrayZipData_"])
             elif opt["compression"] == "gzip":
-                newobj["_ArrayZipData_"] = zlib.compress(newobj["_ArrayZipData_"], zlib.MAX_WBITS | 32)
+                gzipper = zlib.compressobj(wbits=(zlib.MAX_WBITS | 16))
+                newobj["_ArrayZipData_"] = gzipper.compress(newobj["_ArrayZipData_"])
             elif opt["compression"] == "lzma":
                 try:
                     newobj["_ArrayZipData_"] = lzma.compress(newobj["_ArrayZipData_"], lzma.FORMAT_ALONE)
