@@ -4,7 +4,7 @@
 
 - Copyright: (C) Qianqian Fang (2019-2022) <q.fang at neu.edu>
 - License: Apache License, Version 2.0
-- Version: 0.4.4
+- Version: 0.5.0
 - URL: https://github.com/NeuroJSON/pyjdata
 
 [![Build Status](https://travis-ci.com/fangq/pyjdata.svg?branch=master)](https://travis-ci.com/fangq/pyjdata)
@@ -39,6 +39,7 @@ Dependencies:
 * (optional) **bjdata**: PIP: run `pip install bjdata` or `sudo apt-get install python3-bjdata`, see https://pypi.org/project/bjdata/, only needed to read/write BJData/UBJSON files
 * (optional) **lz4**: PIP: run `pip install lz4`, only needed when encoding/decoding lz4-compressed data
 * (optional) **backports.lzma**: PIP: run `sudo apt-get install liblzma-dev` and `pip install backports.lzma` (needed for Python 2.7), only needed when encoding/decoding lzma-compressed data
+* (optional) **blosc2**: PIP: run `pip install blosc2`, only needed when encoding/decoding blosc2-compressed data
 
 Replacing `pip` by `pip3` if you are using Python 3.x. If either `pip` or `pip3` 
 does not exist on your system, please run
@@ -100,6 +101,16 @@ jd.save(a,'test.json')
 newdata=jd.load('test.json')
 newdata
 ```
+
+PyJData supports multiple N-D array data compression/decompression methods (i.e. codecs), similar
+to HDF5 filters. The currently supported filters include `zlib`, `gzip`, `lz4`, `lzma`, and various
+`blosc2` compression methods, including `blosc2blosclz`, `blosc2lz4`, `blosc2lz4hc`, `blosc2zlib`,
+`blosc2zstd`. To apply a selected compression method, one simply set `{'compression':'method'}` as
+the option to `jdata.encode` or `jdata.save` function; `jdata.load` or `jdata.decode` automatically
+decompress the data based on the `_ArrayZipType_` annotation present in the data. Only `blosc2`
+compression methods support multi-threading. To set the thread number, one should define a `nthread`
+value in the option for both encoding and decoding.
+
 
 ## Utility
 
