@@ -30,7 +30,7 @@ jdtype={'float32':'single','float64':'double','float_':'double',
 'complex64':'single','longlong':'int64','ulonglong':'uint64',
 'csingle':'single','cdouble':'double'};
 
-_zipper=['zlib','gzip','lzma','lz4','base64'];
+_zipper=['zlib','gzip','lzma','lz4','blosc2blosclz','blosc2lz4','blosc2lz4hc','blosc2zlib','blosc2zstd','base64'];
 
 ##====================================================================================
 ## Python to JData encoding function
@@ -60,6 +60,11 @@ def encode(d, opt={}):
                 import lz4.frame
             except ImportError:
                 raise Exception('JData', 'you must install "lz4" module to compress with this format')
+        elif(opt['compression'].startswith('blosc2')):
+            try:
+                import blosc2
+            except ImportError:
+                raise Exception('JData', 'you must install "blosc2" module to compress with this format')
 
     if isinstance(d, float):
         if(np.isnan(d)):
@@ -104,20 +109,29 @@ def encode(d, opt={}):
                     newobj['_ArrayZipData_']=zlib.compress(newobj['_ArrayZipData_'],zlib.MAX_WBITS|32);
                 elif(opt['compression']=='lzma'):
                     try:
-                        try:
-                            import lzma
-                        except ImportError:
-                            from backports import lzma
                         newobj['_ArrayZipData_']=lzma.compress(newobj['_ArrayZipData_'],lzma.FORMAT_ALONE);
                     except Exception:
                         print('you must install "lzma" module to compress with this format, ignoring')
                         pass
                 elif(opt['compression']=='lz4'):
                     try:
-                        import lz4.frame
                         newobj['_ArrayZipData_']=lz4.frame.compress(newobj['_ArrayZipData_']);
                     except ImportError:
                         print('you must install "lz4" module to compress with this format, ignoring')
+                        pass
+                elif(opt['compression'].startswith('blosc2')):
+                    try:
+                        BLOSC2CODEC={
+                            'blosc2blosclz': blosc2.Codec.BLOSCLZ, 'blosc2lz4':  blosc2.Codec.LZ4,
+                            'blosc2lz4hc':   blosc2.Codec.LZ4HC,   'blosc2zlib': blosc2.Codec.ZLIB,
+                            'blosc2zstd':    blosc2.Codec.ZSTD
+                        }
+                        blosc2nthread = 1
+                        if('nthread' in opt):
+                            blosc2nthread = opt['nthread']
+                        newobj['_ArrayZipData_']=blosc2.compress2(newobj['_ArrayZipData_'], compcode=BLOSC2CODEC[opt['compression']], typesize=d.dtype.itemsize, nthread=blosc2nthread)
+                    except ImportError:
+                        print('you must install "blosc2" module to compress with this format, ignoring')
                         pass
                 if(('base64' in opt) and (opt['base64'])) or opt['compression']=='base64':
                     newobj['_ArrayZipData_']=base64.b64encode(newobj['_ArrayZipData_']);
@@ -177,6 +191,16 @@ def decode(d, opt={}):
                         newobj=lz4.frame.decompress(bytes(newobj))
                     except Exception:
                         print('Warning: you must install "lz4" module to decompress a data record in this file, ignoring')
+                        pass
+                elif(d['_ArrayZipType_'].startswith('blosc2')):
+                    try:
+                        import blosc2
+                        blosc2nthread = 1
+                        if('nthread' in opt):
+                            blosc2nthread = opt['nthread']
+                        newobj=blosc2.decompress2(bytes(newobj), as_bytearray=False, nthread=blosc2nthread)
+                    except Exception:
+                        print('Warning: you must install "blosc2" module to decompress a data record in this file, ignoring')
                         pass
                 newobj=np.fromstring(newobj,dtype=np.dtype(d['_ArrayType_'])).reshape(d['_ArrayZipSize_']);
                 if('_ArrayIsComplex_' in d and newobj.shape[0]==2):
