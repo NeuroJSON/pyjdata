@@ -108,7 +108,7 @@ to HDF5 filters. Currently supported codecs include `zlib`, `gzip`, `lz4`, `lzma
 `blosc2zstd`. To apply a selected compression method, one simply set `{'compression':'method'}` as
 the option to `jdata.encode` or `jdata.save` function; `jdata.load` or `jdata.decode` automatically
 decompress the data based on the `_ArrayZipType_` annotation present in the data. Only `blosc2`
-compression methods support multi-threading. To set the thread number, one should define a `nthread`
+compression methods support multi-threading. To set the thread number, one should define an `nthread`
 value in the option (`opt`) for both encoding and decoding.
 
 
