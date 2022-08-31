@@ -103,13 +103,13 @@ newdata
 ```
 
 PyJData supports multiple N-D array data compression/decompression methods (i.e. codecs), similar
-to HDF5 filters. The currently supported filters include `zlib`, `gzip`, `lz4`, `lzma`, and various
+to HDF5 filters. Currently supported codecs include `zlib`, `gzip`, `lz4`, `lzma`, `base64` and various
 `blosc2` compression methods, including `blosc2blosclz`, `blosc2lz4`, `blosc2lz4hc`, `blosc2zlib`,
 `blosc2zstd`. To apply a selected compression method, one simply set `{'compression':'method'}` as
 the option to `jdata.encode` or `jdata.save` function; `jdata.load` or `jdata.decode` automatically
 decompress the data based on the `_ArrayZipType_` annotation present in the data. Only `blosc2`
 compression methods support multi-threading. To set the thread number, one should define a `nthread`
-value in the option for both encoding and decoding.
+value in the option (`opt`) for both encoding and decoding.
 
 
 ## Utility
