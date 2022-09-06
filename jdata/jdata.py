@@ -77,6 +77,9 @@ def encode(d, opt={}):
                         'blosc2lz4hc','blosc2zlib','blosc2zstd'] for compression codec, default is None
          'nthread': number of compression thread of the codec is of the blosc2 class, default is 1
     """
+
+    opt.setdefault("inplace", False)
+
     if "compression" in opt:
         if opt["compression"] == "lzma":
             try:
@@ -189,7 +192,7 @@ def encode(d, opt={}):
             newobj.pop("_ArrayData_")
         return newobj
     else:
-        return copy.deepcopy(d)
+        return copy.deepcopy(d) if opt["inplace"] else d
 
 
 ##====================================================================================
@@ -207,6 +210,9 @@ def decode(d, opt={}):
     @param[in] opt: options, can contain a dict with the following keys
          'nthread': number of decompression thread of the codec is of the blosc2 class, default is 1
     """
+
+    opt.setdefault("inplace", False)
+
     if (isinstance(d, str) or type(d) == "unicode") and len(d) <= 6 and len(d) > 4 and d[-1] == "_":
         if d == "_NaN_":
             return float("nan")
@@ -249,7 +255,7 @@ def decode(d, opt={}):
                         newobj = lz4.frame.decompress(bytes(newobj))
                     except Exception:
                         print('Warning: you must install "lz4" module to decompress a data record in this file, ignoring')
-                        return copy.deepcopy(d)
+                        return copy.deepcopy(d) if opt["inplace"] else d
                 elif d["_ArrayZipType_"].startswith("blosc2"):
                     try:
                         import blosc2
@@ -260,7 +266,7 @@ def decode(d, opt={}):
                         newobj = blosc2.decompress2(bytes(newobj), as_bytearray=False, nthreads=blosc2nthread)
                     except Exception:
                         print('Warning: you must install "blosc2" module to decompress a data record in this file, ignoring')
-                        return copy.deepcopy(d)
+                        return copy.deepcopy(d) if opt["inplace"] else d
                 newobj = np.frombuffer(newobj, dtype=np.dtype(d["_ArrayType_"])).reshape(d["_ArrayZipSize_"])
                 if "_ArrayIsComplex_" in d and newobj.shape[0] == 2:
                     newobj = newobj[0] + 1j * newobj[1]
@@ -300,7 +306,7 @@ def decode(d, opt={}):
                 )
         return decodedict(d, opt)
     else:
-        return copy.deepcopy(d)
+        return copy.deepcopy(d) if opt["inplace"] else d
 
 
 ##====================================================================================
@@ -344,7 +350,7 @@ def encodedict(d0, opt={}):
 
 
 def encodelist(d0, opt={}):
-    d = copy.deepcopy(d0)
+    d = copy.deepcopy(d0) if opt["inplace"] else d0
     for i, s in enumerate(d):
         d[i] = encode(s, opt)
     return d
@@ -367,7 +373,7 @@ def decodedict(d0, opt={}):
 
 
 def decodelist(d0, opt={}):
-    d = copy.deepcopy(d0)
+    d = copy.deepcopy(d0) if opt["inplace"] else d0
     for i, s in enumerate(d):
         d[i] = decode(s, opt)
     return d

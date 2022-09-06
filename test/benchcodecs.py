@@ -2,13 +2,14 @@
     Speed benchmark for saving/loading numpy arrays using various compression codecs
 """
 import jdata as jd
+import bjdata as bj
 import numpy as np
 import time
 import os
 
 print("jdata version:" + jd.__version__)
 
-codecs = ["npy", "npz", "zlib", "lzma", "lz4", "blosc2blosclz", "blosc2lz4", "blosc2lz4hc", "blosc2zlib", "blosc2zstd"]
+codecs = ["npy", "npz", "bjd", "zlib", "lzma", "lz4", "blosc2blosclz", "blosc2lz4", "blosc2lz4hc", "blosc2zlib", "blosc2zstd"]
 nthread = 8
 
 
@@ -21,6 +22,9 @@ def benchmark(codec, x):
     elif codec == "npz":
         ext = "." + codec
         np.savez_compressed("matrix_" + codec + ext, x)
+    elif codec == "bjd":
+        ext = "." + codec
+        jd.save(x, "matrix_" + codec + ext, {"encode": False})
     else:
         jd.save(x, "matrix_" + codec + ext, {"compression": codec, "nthread": nthread})
     dt = time.time() - t0  # saving time

@@ -87,6 +87,7 @@ def loadt(fname, opt={}, **kwargs):
     kwargs.setdefault("strict", False)
     kwargs.setdefault("object_pairs_hook", OrderedDict)
     opt.setdefault("decode", True)
+    opt.setdefault("inplace", True)
     opt["base64"] = True
 
     with open(fname, "r") as fid:
@@ -106,6 +107,7 @@ def savet(data, fname, opt={}, **kwargs):
     """
     kwargs.setdefault("default", jd.jsonfilter)
     opt.setdefault("encode", True)
+    opt.setdefault("inplace", True)
     opt["base64"] = True
 
     if opt["encode"]:
@@ -125,6 +127,7 @@ def show(data, opt={}, **kwargs):
     kwargs.setdefault("default", jd.jsonfilter)
     opt.setdefault("string", False)
     opt.setdefault("encode", True)
+    opt.setdefault("inplace", True)
     opt["base64"] = True
 
     if opt["encode"]:
@@ -150,6 +153,7 @@ def loadb(fname, opt={}, **kwargs):
     @param[in] opt: options, if opt['decode']=True or 1 (default), call jdata.decode() before saving
     """
     opt.setdefault("decode", True)
+    opt.setdefault("inplace", True)
     opt["base64"] = False
 
     try:
@@ -172,6 +176,7 @@ def saveb(data, fname, opt={}, **kwargs):
     @param[in] opt: options, if opt['encode']=True or 1 (default), call jdata.encode() before saving
     """
     opt.setdefault("encode", True)
+    opt.setdefault("inplace", True)
 
     try:
         import bjdata
