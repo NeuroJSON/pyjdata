@@ -136,7 +136,7 @@ def encode(d, opt={}):
             newobj["_ArraySize_"] = list(d.shape)
         if d.dtype == np.complex64 or d.dtype == np.complex128 or d.dtype == np.csingle or d.dtype == np.cdouble:
             newobj["_ArrayIsComplex_"] = True
-            newobj["_ArrayData_"] = np.stack(d.ravel().real, d.ravel().imag)
+            newobj["_ArrayData_"] = np.stack((d.ravel().real, d.ravel().imag))
         else:
             newobj["_ArrayData_"] = d.ravel()
 
