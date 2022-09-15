@@ -36,7 +36,7 @@ to restore the original data types
 from .jfile import load, save, show, loadt, savet, loadb, saveb, jext
 from .jdata import encode, decode, jdtype, jsonfilter
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 __all__ = [
     "load",
     "save",
