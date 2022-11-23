@@ -4,7 +4,7 @@
 
 - Copyright: (C) Qianqian Fang (2019-2022) <q.fang at neu.edu>
 - License: Apache License, Version 2.0
-- Version: 0.5.1
+- Version: 0.5.2
 - URL: https://github.com/NeuroJSON/pyjdata
 
 [![Build Status](https://travis-ci.com/fangq/pyjdata.svg?branch=master)](https://travis-ci.com/fangq/pyjdata)

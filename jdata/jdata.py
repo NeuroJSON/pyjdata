@@ -267,7 +267,7 @@ def decode(d, opt={}):
                     except Exception:
                         print('Warning: you must install "blosc2" module to decompress a data record in this file, ignoring')
                         return copy.deepcopy(d) if opt["inplace"] else d
-                newobj = np.frombuffer(newobj, dtype=np.dtype(d["_ArrayType_"])).reshape(d["_ArrayZipSize_"])
+                newobj = np.frombuffer(bytearray(newobj), dtype=np.dtype(d["_ArrayType_"])).reshape(d["_ArrayZipSize_"])
                 if "_ArrayIsComplex_" in d and newobj.shape[0] == 2:
                     newobj = newobj[0] + 1j * newobj[1]
                 if "_ArrayOrder_" in d and (
