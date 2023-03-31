@@ -115,8 +115,10 @@ def encode(d, opt={}):
         elif np.isinf(d):
             return "_Inf_" if (d > 0) else "-_Inf_"
         return d
-    elif isinstance(d, list) or isinstance(d, tuple) or isinstance(d, set) or isinstance(d, frozenset):
+    elif isinstance(d, list) or isinstance(d, set):
         return encodelist(d, opt)
+    elif isinstance(d, tuple) or isinstance(d, frozenset):
+        return encodelist(list(d), opt)
     elif isinstance(d, dict):
         return encodedict(d, opt)
     elif isinstance(d, complex):
@@ -221,8 +223,10 @@ def decode(d, opt={}):
         elif d == "-_Inf_":
             return float("-inf")
         return d
-    elif isinstance(d, list) or isinstance(d, tuple) or isinstance(d, set) or isinstance(d, frozenset):
+    elif isinstance(d, list) or isinstance(d, set):
         return decodelist(d, opt)
+    elif isinstance(d, tuple) or isinstance(d, frozenset):
+        return decodelist(list(d), opt)
     elif isinstance(d, dict):
         if "_ArrayType_" in d:
             if isinstance(d["_ArraySize_"], str):
