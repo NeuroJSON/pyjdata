@@ -2,12 +2,12 @@
 
 # JData for Python - lightweight and serializable data annotations for Python
 
-- Copyright: (C) Qianqian Fang (2019-2022) <q.fang at neu.edu>
+- Copyright: (C) Qianqian Fang (2019-2024) <q.fang at neu.edu>
 - License: Apache License, Version 2.0
 - Version: 0.5.3
 - URL: https://github.com/NeuroJSON/pyjdata
 
-[![Build Status](https://travis-ci.com/fangq/pyjdata.svg?branch=master)](https://travis-ci.com/fangq/pyjdata)
+![Build Status](https://github.com/NeuroJSON/pyjdata/actions/workflows/run_test.yml/badge.svg)
 
 The [JData Specification](https://github.com/NeuroJSON/jdata/) defines a lightweight 
 language-independent data annotation interface targetted at
