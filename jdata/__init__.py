@@ -36,6 +36,7 @@ to restore the original data types
 from .jfile import (
     load,
     save,
+    loadurl,
     show,
     loadt,
     savet,
@@ -48,11 +49,13 @@ from .jfile import (
     jext,
 )
 from .jdata import encode, decode, jdtype, jsonfilter
+from .jpath import jsonpath
 
 __version__ = "0.5.5"
 __all__ = [
     "load",
     "save",
+    "loadurl",
     "show",
     "loadt",
     "savet",
@@ -67,6 +70,7 @@ __all__ = [
     "jdtype",
     "jsonfilter",
     "jext",
+    "jsonpath",
 ]
 __license__ = """Apache license 2.0, Copyright (c) 2019-2024 Qianqian Fang"""
 

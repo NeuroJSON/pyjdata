@@ -7,6 +7,7 @@ Copyright (c) 2019-2024 Qianqian Fang <q.fang at neu.edu>
 __all__ = [
     "load",
     "save",
+    "loadurl",
     "show",
     "loadt",
     "savet",
@@ -54,7 +55,7 @@ def load(fname, opt={}, **kwargs):
     """
     if re.match("^https*://", fname):
         newdata = downloadlink(fname, opt, **kwargs)
-        return newdata
+        return newdata[0]
 
     spl = os.path.splitext(fname)
     ext = spl[1].lower()
@@ -99,6 +100,24 @@ def save(data, fname, opt={}, **kwargs):
             + ";"
             + ",".join(jext["b"])
             + ")",
+        )
+
+
+def loadurl(url, opt={}, **kwargs):
+    """@brief Loading a JData file (binary or text) from a URL without caching locally
+
+    @param[in] url: a REST API URL, curently only support http:// and https://
+    @param[in] opt: options, opt['nocache']=True by default, setting to False download and locally cache the data
+    """
+    opt.setdefault("nocache", True)
+
+    if re.match("^https*://", url):
+        newdata = downloadlink(url, opt, **kwargs)
+        return newdata[0]
+    else:
+        raise Exception(
+            "JData",
+            "input to loadurl is not a valid URL",
         )
 
 
@@ -370,7 +389,6 @@ def jsoncache(url, opt={}, **kwargs):
         if p is not None:
             cachepath.insert(0, p)
         elif dbname and docname:
-            print([domain, dbname, docname, cachepath])
             cachepath = [os.path.join(x, domain, dbname, docname) for x in cachepath]
         if filename is not None:
             for i in range(len(cachepath)):
@@ -421,7 +439,7 @@ def jdlink(uripath, opt={}, **kwargs):
             )
         alloutput = [[] for _ in range(3)]
         for i in range(len(uripath)):
-            newdata, fname, cachepath = downloadlink(uripath[i], opt)
+            newdata, fname, cachepath = downloadlink(uripath[i], opt, **kwargs)
             alloutput[0].append(newdata)
             alloutput[1].append(fname)
             alloutput[2].append(cachepath)
@@ -429,12 +447,23 @@ def jdlink(uripath, opt={}, **kwargs):
             alloutput = [x[0] for x in alloutput]
         newdata, fname, cachepath = tuple(alloutput)
     elif isinstance(uripath, str):
-        newdata, fname, cachepath = downloadlink(uripath, opt)
+        newdata, fname, cachepath = downloadlink(uripath, opt, **kwargs)
     return newdata, fname
 
 
-def downloadlink(uripath, opt={}):
+def downloadlink(uripath, opt={}, **kwargs):
     opt.setdefault("showlink", 1)
+
+    if "nocache" in opt and opt["nocache"]:
+        newdata = urllib.request.urlopen(uripath).read()
+        try:
+            newdata = loadts(newdata, opt, **kwargs)
+        except:
+            try:
+                newdata = loadbs(newdata, opt, **kwargs)
+            except:
+                pass
+        return newdata, uripath, None
 
     newdata = []
     cachepath, filename = jsoncache(uripath)
