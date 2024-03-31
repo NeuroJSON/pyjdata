@@ -42,7 +42,13 @@ class TestModule(unittest.TestCase):
 
         print("== JData-annotated data exported to JSON with zlib compression ==")
         newdata = data.copy()
-        print(jd.show(jd.encode(newdata, {"compression": "zlib", "base64": True}), indent=4, default=jd.jsonfilter))
+        print(
+            jd.show(
+                jd.encode(newdata, {"compression": "zlib", "base64": True}),
+                indent=4,
+                default=jd.jsonfilter,
+            )
+        )
 
         print("== Decoding a JData-encoded data and printed in JSON format ==")
         newdata = data.copy()

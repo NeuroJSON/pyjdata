@@ -9,7 +9,19 @@ import os
 
 print("jdata version:" + jd.__version__)
 
-codecs = ["npy", "npz", "bjd", "zlib", "lzma", "lz4", "blosc2blosclz", "blosc2lz4", "blosc2lz4hc", "blosc2zlib", "blosc2zstd"]
+codecs = [
+    "npy",
+    "npz",
+    "bjd",
+    "zlib",
+    "lzma",
+    "lz4",
+    "blosc2blosclz",
+    "blosc2lz4",
+    "blosc2lz4hc",
+    "blosc2zlib",
+    "blosc2zstd",
+]
 nthread = 8
 
 

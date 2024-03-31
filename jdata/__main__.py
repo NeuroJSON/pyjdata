@@ -21,7 +21,9 @@ def main():
     # get arguments and invoke the conversion routines
     #
 
-    parser = argparse.ArgumentParser(description="Convert a text JSON/JData file to a binary JSON/JData file and vice versa.")
+    parser = argparse.ArgumentParser(
+        description="Convert a text JSON/JData file to a binary JSON/JData file and vice versa."
+    )
 
     parser.add_argument(
         "file",

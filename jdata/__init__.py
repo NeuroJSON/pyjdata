@@ -33,25 +33,42 @@ The JData-encoded data object can then be decoded using ``decode``
 to restore the original data types
 """
 
-from .jfile import load, save, show, loadt, savet, loadb, saveb, jext
+from .jfile import (
+    load,
+    save,
+    show,
+    loadt,
+    savet,
+    loadts,
+    loadbs,
+    loadb,
+    saveb,
+    jsoncache,
+    jdlink,
+    jext,
+)
 from .jdata import encode, decode, jdtype, jsonfilter
 
-__version__ = "0.5.3"
+__version__ = "0.5.5"
 __all__ = [
     "load",
     "save",
     "show",
     "loadt",
     "savet",
+    "loadts",
+    "loadbs",
     "loadb",
     "saveb",
     "encode",
     "decode",
+    "jsoncache",
+    "jdlink",
     "jdtype",
     "jsonfilter",
     "jext",
 ]
-__license__ = """Apache license 2.0, Copyright (c) 2019-2022 Qianqian Fang"""
+__license__ = """Apache license 2.0, Copyright (c) 2019-2024 Qianqian Fang"""
 
 
 if __name__ == "__main__":

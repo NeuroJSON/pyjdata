@@ -2,7 +2,7 @@
 Encoding and decoding python native data structures as
 portable JData-spec annotated dict structure
 
-Copyright (c) 2019-2022 Qianqian Fang <q.fang at neu.edu>
+Copyright (c) 2019-2024 Qianqian Fang <q.fang at neu.edu>
 """
 
 __all__ = ["encode", "decode", "jdtype", "jsonfilter"]
@@ -15,6 +15,9 @@ import numpy as np
 import copy
 import zlib
 import base64
+import os
+import re
+from .jfile import jdlink
 
 ##====================================================================================
 ## global variables
@@ -131,12 +134,19 @@ def encode(d, opt={}):
         return newobj
     elif isinstance(d, np.ndarray) or np.iscomplex(d):
         newobj = {}
-        newobj["_ArrayType_"] = jdtype[str(d.dtype)] if (str(d.dtype) in jdtype) else str(d.dtype)
+        newobj["_ArrayType_"] = (
+            jdtype[str(d.dtype)] if (str(d.dtype) in jdtype) else str(d.dtype)
+        )
         if np.isscalar(d):
             newobj["_ArraySize_"] = 1
         else:
             newobj["_ArraySize_"] = list(d.shape)
-        if d.dtype == np.complex64 or d.dtype == np.complex128 or d.dtype == np.csingle or d.dtype == np.cdouble:
+        if (
+            d.dtype == np.complex64
+            or d.dtype == np.complex128
+            or d.dtype == np.csingle
+            or d.dtype == np.cdouble
+        ):
             newobj["_ArrayIsComplex_"] = True
             newobj["_ArrayData_"] = np.stack((d.ravel().real, d.ravel().imag))
         else:
@@ -158,15 +168,23 @@ def encode(d, opt={}):
                 newobj["_ArrayZipData_"] = gzipper.compress(newobj["_ArrayZipData_"])
             elif opt["compression"] == "lzma":
                 try:
-                    newobj["_ArrayZipData_"] = lzma.compress(newobj["_ArrayZipData_"], lzma.FORMAT_ALONE)
+                    newobj["_ArrayZipData_"] = lzma.compress(
+                        newobj["_ArrayZipData_"], lzma.FORMAT_ALONE
+                    )
                 except Exception:
-                    print('you must install "lzma" module to compress with this format, ignoring')
+                    print(
+                        'you must install "lzma" module to compress with this format, ignoring'
+                    )
                     pass
             elif opt["compression"] == "lz4":
                 try:
-                    newobj["_ArrayZipData_"] = lz4.frame.compress(newobj["_ArrayZipData_"].tobytes())
+                    newobj["_ArrayZipData_"] = lz4.frame.compress(
+                        newobj["_ArrayZipData_"].tobytes()
+                    )
                 except ImportError:
-                    print('you must install "lz4" module to compress with this format, ignoring')
+                    print(
+                        'you must install "lz4" module to compress with this format, ignoring'
+                    )
                     pass
             elif opt["compression"].startswith("blosc2"):
                 try:
@@ -187,9 +205,13 @@ def encode(d, opt={}):
                         nthreads=blosc2nthread,
                     )
                 except ImportError:
-                    print('you must install "blosc2" module to compress with this format, ignoring')
+                    print(
+                        'you must install "blosc2" module to compress with this format, ignoring'
+                    )
                     pass
-            if (("base64" in opt) and (opt["base64"])) or opt["compression"] == "base64":
+            if (("base64" in opt) and (opt["base64"])) or opt[
+                "compression"
+            ] == "base64":
                 newobj["_ArrayZipData_"] = base64.b64encode(newobj["_ArrayZipData_"])
             newobj.pop("_ArrayData_")
         return newobj
@@ -214,8 +236,14 @@ def decode(d, opt={}):
     """
 
     opt.setdefault("inplace", False)
+    opt.setdefault("maxlinklevel", 0)
 
-    if (isinstance(d, str) or type(d) == "unicode") and len(d) <= 6 and len(d) > 4 and d[-1] == "_":
+    if (
+        (isinstance(d, str) or type(d) == "unicode")
+        and len(d) <= 6
+        and len(d) > 4
+        and d[-1] == "_"
+    ):
         if d == "_NaN_":
             return float("nan")
         elif d == "_Inf_":
@@ -233,12 +261,16 @@ def decode(d, opt={}):
                 d["_ArraySize_"] = np.frombuffer(bytearray(d["_ArraySize_"]))
             if "_ArrayZipData_" in d:
                 newobj = d["_ArrayZipData_"]
-                if (("base64" in opt) and (opt["base64"])) or ("_ArrayZipType_" in d and d["_ArrayZipType_"] == "base64"):
+                if (("base64" in opt) and (opt["base64"])) or (
+                    "_ArrayZipType_" in d and d["_ArrayZipType_"] == "base64"
+                ):
                     newobj = base64.b64decode(newobj)
                 if "_ArrayZipType_" in d and d["_ArrayZipType_"] not in _zipper:
                     raise Exception(
                         "JData",
-                        "compression method {} is not supported".format(d["_ArrayZipType_"]),
+                        "compression method {} is not supported".format(
+                            d["_ArrayZipType_"]
+                        ),
                     )
                 if d["_ArrayZipType_"] == "zlib":
                     newobj = zlib.decompress(bytes(newobj))
@@ -258,7 +290,9 @@ def decode(d, opt={}):
 
                         newobj = lz4.frame.decompress(bytes(newobj))
                     except Exception:
-                        print('Warning: you must install "lz4" module to decompress a data record in this file, ignoring')
+                        print(
+                            'Warning: you must install "lz4" module to decompress a data record in this file, ignoring'
+                        )
                         return copy.deepcopy(d) if opt["inplace"] else d
                 elif d["_ArrayZipType_"].startswith("blosc2"):
                     try:
@@ -267,15 +301,23 @@ def decode(d, opt={}):
                         blosc2nthread = 1
                         if "nthread" in opt:
                             blosc2nthread = opt["nthread"]
-                        newobj = blosc2.decompress2(bytes(newobj), as_bytearray=False, nthreads=blosc2nthread)
+                        newobj = blosc2.decompress2(
+                            bytes(newobj), as_bytearray=False, nthreads=blosc2nthread
+                        )
                     except Exception:
-                        print('Warning: you must install "blosc2" module to decompress a data record in this file, ignoring')
+                        print(
+                            'Warning: you must install "blosc2" module to decompress a data record in this file, ignoring'
+                        )
                         return copy.deepcopy(d) if opt["inplace"] else d
-                newobj = np.frombuffer(bytearray(newobj), dtype=np.dtype(d["_ArrayType_"])).reshape(d["_ArrayZipSize_"])
+                newobj = np.frombuffer(
+                    bytearray(newobj), dtype=np.dtype(d["_ArrayType_"])
+                ).reshape(d["_ArrayZipSize_"])
                 if "_ArrayIsComplex_" in d and newobj.shape[0] == 2:
                     newobj = newobj[0] + 1j * newobj[1]
                 if "_ArrayOrder_" in d and (
-                    d["_ArrayOrder_"].lower() == "c" or d["_ArrayOrder_"].lower() == "col" or d["_ArrayOrder_"].lower() == "column"
+                    d["_ArrayOrder_"].lower() == "c"
+                    or d["_ArrayOrder_"].lower() == "col"
+                    or d["_ArrayOrder_"].lower() == "column"
                 ):
                     newobj = newobj.reshape(d["_ArraySize_"], order="F")
                 else:
@@ -285,17 +327,25 @@ def decode(d, opt={}):
                 return newobj
             elif "_ArrayData_" in d:
                 if isinstance(d["_ArrayData_"], str):
-                    newobj = np.frombuffer(d["_ArrayData_"], dtype=np.dtype(d["_ArrayType_"]))
+                    newobj = np.frombuffer(
+                        d["_ArrayData_"], dtype=np.dtype(d["_ArrayType_"])
+                    )
                 else:
-                    newobj = np.asarray(d["_ArrayData_"], dtype=np.dtype(d["_ArrayType_"]))
+                    newobj = np.asarray(
+                        d["_ArrayData_"], dtype=np.dtype(d["_ArrayType_"])
+                    )
                 if "_ArrayZipSize_" in d and newobj.shape[0] == 1:
                     if isinstance(d["_ArrayZipSize_"], str):
-                        d["_ArrayZipSize_"] = np.frombuffer(bytearray(d["_ArrayZipSize_"]))
+                        d["_ArrayZipSize_"] = np.frombuffer(
+                            bytearray(d["_ArrayZipSize_"])
+                        )
                     newobj = newobj.reshape(d["_ArrayZipSize_"])
                 if "_ArrayIsComplex_" in d and newobj.shape[0] == 2:
                     newobj = newobj[0] + 1j * newobj[1]
                 if "_ArrayOrder_" in d and (
-                    d["_ArrayOrder_"].lower() == "c" or d["_ArrayOrder_"].lower() == "col" or d["_ArrayOrder_"].lower() == "column"
+                    d["_ArrayOrder_"].lower() == "c"
+                    or d["_ArrayOrder_"].lower() == "col"
+                    or d["_ArrayOrder_"].lower() == "column"
                 ):
                     newobj = newobj.reshape(d["_ArraySize_"], order="F")
                 else:
@@ -308,6 +358,33 @@ def decode(d, opt={}):
                     "JData",
                     "one and only one of _ArrayData_ or _ArrayZipData_ is required",
                 )
+        elif "_DataLink_" in d:
+            if opt["maxlinklevel"] > 0 and "_DataLink_" in data:
+                if isinstance(data["_DataLink_"], str):
+                    datalink = data["_DataLink_"]
+                    if re.search("\:\$", datalink):
+                        ref = re.search(
+                            "^(?P<proto>[a-zA-Z]+://)*(?P<path>.+)(?P<delim>\:)()*(?P<jsonpath>(?<=:)\$\d*\.*.*)*",
+                            datalink,
+                        )
+                    else:
+                        ref = re.search(
+                            "^(?P<proto>[a-zA-Z]+://)*(?P<path>.+)(?P<delim>\:)*(?P<jsonpath>(?<=:)\$\d*\..*)*",
+                            datalink,
+                        )
+                    if ref and ref.group("path"):
+                        uripath = ref.group("proto") + ref.group("path")
+                        newobj, fname = jdlink(uripath)
+                        if os.path.exists(fname):
+                            opt["maxlinklevel"] = opt["maxlinklevel"] - 1
+                            if ref.group("jsonpath"):
+                                newobj = jsonpath(newdata, ref.group("jsonpath"))
+                        return nrewobj
+                    else:
+                        raise Exception(
+                            "JData",
+                            "_DataLink_ contains invalid URL",
+                        )
         return decodedict(d, opt)
     else:
         return copy.deepcopy(d) if opt["inplace"] else d

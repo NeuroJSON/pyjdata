@@ -1,10 +1,23 @@
 """@package docstring
 File IO to load/decode JData-based files to Python data or encode/save Python data to JData files
 
-Copyright (c) 2019-2022 Qianqian Fang <q.fang at neu.edu>
+Copyright (c) 2019-2024 Qianqian Fang <q.fang at neu.edu>
 """
 
-__all__ = ["load", "save", "show", "loadt", "savet", "loadb", "saveb", "jext"]
+__all__ = [
+    "load",
+    "save",
+    "show",
+    "loadt",
+    "savet",
+    "loadts",
+    "loadbs",
+    "loadb",
+    "saveb",
+    "jsoncache",
+    "jdlink",
+    "jext",
+]
 
 ##====================================================================================
 ## dependent libraries
@@ -12,7 +25,11 @@ __all__ = ["load", "save", "show", "loadt", "savet", "loadb", "saveb", "jext"]
 
 import json
 import os
+import re
 import jdata as jd
+import urllib.request
+from hashlib import sha256
+from sys import platform
 from collections import OrderedDict
 
 ##====================================================================================
@@ -20,8 +37,8 @@ from collections import OrderedDict
 ##====================================================================================
 
 jext = {
-    "t": [".json", ".jdt", ".jdat", ".jnii", ".jmsh", ".jnirs"],
-    "b": [".ubj", ".bjd", ".jdb", ".jbat", ".bnii", ".bmsh", ".jamm", ".bnirs"],
+    "t": [".json", ".jdt", ".jdat", ".jnii", ".jmsh", ".jnirs", ".jbids"],
+    "b": [".ubj", ".bjd", ".jdb", ".jbat", ".bnii", ".bmsh", ".pmat", ".bnirs"],
 }
 
 ##====================================================================================
@@ -35,6 +52,10 @@ def load(fname, opt={}, **kwargs):
     @param[in] fname: a JData file name (accept .json,.jdat,.jbat,.jnii,.bnii,.jmsh,.bmsh)
     @param[in] opt: options, if opt['decode']=True or 1 (default), call jdata.decode() after loading
     """
+    if re.match("^https*://", fname):
+        newdata = downloadlink(fname, opt, **kwargs)
+        return newdata
+
     spl = os.path.splitext(fname)
     ext = spl[1].lower()
 
@@ -45,7 +66,11 @@ def load(fname, opt={}, **kwargs):
     else:
         raise Exception(
             "JData",
-            "file extension is not recognized, accept (" + ",".join(jext["t"]) + ";" + ",".join(jext["b"]) + ")",
+            "file extension is not recognized, accept ("
+            + ",".join(jext["t"])
+            + ";"
+            + ",".join(jext["b"])
+            + ")",
         )
 
 
@@ -69,7 +94,11 @@ def save(data, fname, opt={}, **kwargs):
     else:
         raise Exception(
             "JData",
-            "file extension is not recognized, accept (" + ",".join(jext["t"]) + ";" + ",".join(jext["b"]) + ")",
+            "file extension is not recognized, accept ("
+            + ",".join(jext["t"])
+            + ";"
+            + ",".join(jext["b"])
+            + ")",
         )
 
 
@@ -117,6 +146,53 @@ def savet(data, fname, opt={}, **kwargs):
         json.dump(data, fid, **kwargs)
 
 
+##====================================================================================
+## In-memory buffer Parse and dump
+##====================================================================================
+
+
+def loadts(bytes, opt={}, **kwargs):
+    """@brief Loading a text-based (JSON) JData string buffer and decode it to native Python data
+
+    @param[in] bytes: a JSON string or byte-stream
+    @param[in] opt: options, if opt['decode']=True or 1 (default), call jdata.decode() after loading
+    """
+    kwargs.setdefault("strict", False)
+    kwargs.setdefault("object_pairs_hook", OrderedDict)
+    opt.setdefault("decode", True)
+    opt.setdefault("inplace", True)
+    opt["base64"] = True
+
+    data = json.loads(bytes, **kwargs)
+
+    if opt["decode"]:
+        data = jd.decode(data, opt)
+    return data
+
+
+def loadbs(bytes, opt={}, **kwargs):
+    """@brief Loading a binary-JSON/BJData string buffer and decode it to native Python data
+
+    @param[in] bytes: a BJData byte-buffer or byte-stream
+    @param[in] opt: options, if opt['decode']=True or 1 (default), call jdata.decode() after loading
+    """
+    opt.setdefault("decode", True)
+    opt.setdefault("inplace", True)
+    opt["base64"] = False
+
+    try:
+        import bjdata
+    except ImportError:
+        raise ImportError(
+            'To read/write binary JData files, you must install the bjdata module by "pip install bjdata"'
+        )
+    else:
+        data = bjdata.loadb(bytes, **kwargs)
+        if opt["decode"]:
+            data = jd.decode(data, opt)
+        return data
+
+
 def show(data, opt={}, **kwargs):
     """@brief Printing a python data as JSON string or return the JSON string (opt['string']=True)
 
@@ -159,7 +235,9 @@ def loadb(fname, opt={}, **kwargs):
     try:
         import bjdata
     except ImportError:
-        raise ImportError('To read/write binary JData files, you must install the bjdata module by "pip install bjdata"')
+        raise ImportError(
+            'To read/write binary JData files, you must install the bjdata module by "pip install bjdata"'
+        )
     else:
         with open(fname, "rb") as fid:
             data = bjdata.load(fid, **kwargs)
@@ -181,7 +259,9 @@ def saveb(data, fname, opt={}, **kwargs):
     try:
         import bjdata
     except ImportError:
-        raise ImportError('To read/write binary JData files, you must install the bjdata module by "pip install bjdata"')
+        raise ImportError(
+            'To read/write binary JData files, you must install the bjdata module by "pip install bjdata"'
+        )
     else:
         if opt["encode"]:
             data = jd.encode(data, opt)
@@ -190,5 +270,196 @@ def saveb(data, fname, opt={}, **kwargs):
 
 
 ##====================================================================================
-## helper functions
+## Handling externally linked data files
 ##====================================================================================
+
+
+def jsoncache(url, opt={}, **kwargs):
+    """@brief Printing the local folder and file name where a linked data file in the URL to be saved
+
+    @param[in] url: a URL
+    @param[in] opt: options, if opt['decode']=True or 1 (default), call jdata.decode() before saving
+    """
+
+    pathname = os.getenv("HOME")
+    cachepath = [os.path.join(os.getcwd(), ".neurojson")]
+    dbname, docname, filename = None, None, None
+
+    if pathname != os.getcwd():
+        cachepath.append(os.path.join(pathname, ".neurojson"))
+
+    if platform == "win32":
+        cachepath.append(os.path.join(os.getenv("PROGRAMDATA"), "neurojson"))
+    elif platform == "darwin":
+        cachepath.append(os.path.join(pathname, "Library/neurojson"))
+        cachepath.append("/Library/neurojson")
+    else:
+        cachepath.append(os.path.join(pathname, ".cache/neurojson"))
+        cachepath.append("/var/cache/neurojson")
+
+    if (
+        isinstance(url, list) or isinstance(url, tuple) or isinstance(url, frozenset)
+    ) and len(url) < 4:
+        domain = "default"
+
+    if isinstance(url, str):
+        link = url
+        if re.match("^file://", link) or not re.search("://", link):
+            filename = re.sub("^file://", "", link)
+            if os.path.isfile(filename):
+                cachepath = filename
+                filename = True
+                return cachepath, filename
+
+        else:
+            if re.match("^https*://neurojson.org/io/", link):
+                domain = "io"
+            else:
+                newdomain = re.sub("^(https*|ftp)://([^\/?#:]+).*$", r"\2", link)
+                if newdomain:
+                    domain = newdomain
+
+            dbname = re.search("(?<=db=)[^&]+", link)
+            docname = re.search("(?<=doc=)[^&]+", link)
+            filename = re.search("(?<=file=)[^&]+", link)
+            if dbname:
+                dbname = dbname.group(0)
+            if docname:
+                docname = docname.group(0)
+            if filename:
+                filename = filename.group(0)
+
+            if not filename and domain == "neurojson.io":
+                ref = re.search(
+                    "^(https*|ftp)://neurojson.io(:\d+)*(?P<dbname>/[^\/]+)(?P<docname>/[^\/]+)(?P<filename>/[^\/?]+)*",
+                    link,
+                )
+                if ref:
+                    if ref.group("dbname"):
+                        dbname = ref.group("dbname")[1:]
+                    if ref.group("docname"):
+                        docname = ref.group("docname")[1:]
+                    if ref.group("filename"):
+                        filename = ref.group("filename")[1:]
+                    elif dbname:
+                        if docname:
+                            filename = docname + ".json"
+                        else:
+                            filename = dbname + ".json"
+
+            if not filename:
+                filename = sha256(link.encode("utf-8")).hexdigest()
+                suffix = re.search("\.\w{1,5}(?=([#&].*)*$)", link)
+                if not suffix:
+                    suffix = ""
+                else:
+                    suffix = suffix.group(0)
+                filename = filename + suffix
+                if not dbname:
+                    dbname = filename[0:2]
+                if not docname:
+                    docname = filename[2:4]
+
+    p = globals().get("NEUROJSON_CACHE")
+    if isinstance(url, str) or (
+        isinstance(url, list)
+        or isinstance(url, tuple)
+        or isinstance(url, frozenset)
+        and len(url) >= 3
+    ):
+        if p is not None:
+            cachepath.insert(0, p)
+        elif dbname and docname:
+            print([domain, dbname, docname, cachepath])
+            cachepath = [os.path.join(x, domain, dbname, docname) for x in cachepath]
+        if filename is not None:
+            for i in range(len(cachepath)):
+                if os.path.exists(os.path.join(cachepath[i], filename)):
+                    cachepath = os.path.join(cachepath[i], filename)
+                    filename = True
+                    return cachepath, filename
+        elif "link" in locals():
+            spl = os.path.splitext(link)
+            ext = spl[1].lower()
+            filename = fname + ext
+        if p is not None:
+            cachepath.pop(1)
+        else:
+            cachepath.pop(0)
+        return cachepath, filename
+
+
+def jdlink(uripath, opt={}, **kwargs):
+    """@brief Printing the local folder and file name where a linked data file in the URL to be saved
+
+    @param[in] url: a URL
+    @param[in] opt: options, if opt['decode']=True or 1 (default), call jdata.decode() before saving
+    """
+
+    opt.setdefault("showlink", 1)
+    opt.setdefault("showsize", 1)
+
+    if isinstance(uripath, list):
+        if "regex" in opt:
+            haspattern = [
+                True if re.search(opt["regex"], x) is None else False for x in uripath
+            ]
+            uripath = [x for i, x in enumerate(uripath) if haspattern[i]]
+        if "showsize" in opt:
+            totalsize = 0
+            nosize = 0
+            for i in range(len(uripath)):
+                filesize = re.findall(r"&size=(\d+)", uripath[i])
+                if filesize and filesize[0]:
+                    totalsize += int(filesize[0])
+                else:
+                    nosize += 1
+            print(
+                "total {} links, {} bytes, {} files with unknown size".format(
+                    len(uripath), totalsize, nosize
+                )
+            )
+        alloutput = [[] for _ in range(3)]
+        for i in range(len(uripath)):
+            newdata, fname, cachepath = downloadlink(uripath[i], opt)
+            alloutput[0].append(newdata)
+            alloutput[1].append(fname)
+            alloutput[2].append(cachepath)
+        if len(uripath) == 1:
+            alloutput = [x[0] for x in alloutput]
+        newdata, fname, cachepath = tuple(alloutput)
+    elif isinstance(uripath, str):
+        newdata, fname, cachepath = downloadlink(uripath, opt)
+    return newdata, fname
+
+
+def downloadlink(uripath, opt={}):
+    opt.setdefault("showlink", 1)
+
+    newdata = []
+    cachepath, filename = jsoncache(uripath)
+    if isinstance(cachepath, list) and cachepath:
+        if opt["showlink"]:
+            print("downloading from URL:", uripath)
+        fname = os.path.join(cachepath[0], filename)
+        fpath = os.path.dirname(fname)
+        if not os.path.exists(fpath):
+            os.makedirs(fpath)
+
+        rawdata = urllib.request.urlopen(uripath).read()
+        with open(fname, "wb") as fid:
+            fid.write(rawdata)
+        spl = os.path.splitext(fname)
+        ext = spl[1].lower()
+        if ext in jext["t"] or ext in jext["b"]:
+            newdata = jd.load(fname, opt)
+
+    elif not isinstance(cachepath, list) and os.path.exists(cachepath):
+        if opt["showlink"]:
+            print("loading from cache:", cachepath)
+        fname = cachepath
+        spl = os.path.splitext(fname)
+        ext = spl[1].lower()
+        if ext in jext["t"] or ext in jext["b"]:
+            newdata = jd.load(fname, opt)
+    return newdata, fname, cachepath
