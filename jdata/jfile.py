@@ -437,10 +437,9 @@ def jdlink(uripath, opt={}, **kwargs):
 
     if isinstance(uripath, list):
         if "regex" in opt:
-            haspattern = [
-                True if re.search(opt["regex"], x) is None else False for x in uripath
-            ]
-            uripath = [x for i, x in enumerate(uripath) if haspattern[i]]
+            pat = re.compile(opt["regex"])
+            uripath = [uri for uri in uripath if pat.search(uri)]
+            print(uripath)
         if "showsize" in opt:
             totalsize = 0
             nosize = 0

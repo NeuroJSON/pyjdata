@@ -52,7 +52,7 @@ from .jfile import (
 from .jdata import encode, decode, jdtype, jsonfilter
 from .jpath import jsonpath
 
-__version__ = "0.5.5"
+__version__ = "0.6.0"
 __all__ = [
     "load",
     "save",

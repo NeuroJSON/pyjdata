@@ -6,7 +6,7 @@ with open("README.md", "r") as fh:
 setup(
     name="jdata",
     packages=["jdata"],
-    version="0.5.5",
+    version="0.6.0",
     license="Apache license 2.0",
     description="Encoding and decoding Python data structrues using portable JData-annotated formats",
     long_description=readme,
@@ -15,7 +15,7 @@ setup(
     author_email="fangqq@gmail.com",
     maintainer="Qianqian Fang",
     url="https://github.com/NeuroJSON/pyjdata",
-    download_url="https://github.com/NeuroJSON/pyjdata/archive/v0.5.5.tar.gz",
+    download_url="https://github.com/NeuroJSON/pyjdata/archive/v0.6.0.tar.gz",
     keywords=[
         "JSON",
         "JData",
@@ -44,6 +44,7 @@ setup(
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
         "Topic :: Software Development :: Libraries",
         "Topic :: Software Development :: Libraries :: Python Modules",
     ],

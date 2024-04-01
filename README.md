@@ -4,18 +4,31 @@
 
 - Copyright: (C) Qianqian Fang (2019-2024) <q.fang at neu.edu>
 - License: Apache License, Version 2.0
-- Version: 0.5.5
+- Version: 0.6.0
 - URL: https://github.com/NeuroJSON/pyjdata
+- Acknowledgement: This project is supported by US National Institute of Health (NIH)
+  grant [U24-NS124027](https://reporter.nih.gov/project-details/10308329)
 
 ![Build Status](https://github.com/NeuroJSON/pyjdata/actions/workflows/run_test.yml/badge.svg)
 
 The [JData Specification](https://github.com/NeuroJSON/jdata/) defines a lightweight 
-language-independent data annotation interface targetted at
-storing and sharing complex data structures across different programming
+language-independent data annotation interface enabling easy storing
+and sharing of complex data structures across different programming
 languages such as MATLAB, JavaScript, Python etc. Using JData formats, a 
-complex Python data structure can be encoded as a `dict` object that is easily 
-serialized as a JSON/binary JSON file and share such data between
-programs of different languages.
+complex Python data structure, including numpy objects, can be encoded
+as a simple `dict` object that is easily serialized as a JSON/binary JSON
+file and share such data between programs of different languages.
+
+Since 2021, the development of PyJData module and the underlying data format specificaitons
+[JData](https://neurojson.org/jdata/draft3) and [BJData](https://neurojson.org/bjdata/draft2)
+have been funded by the US National Institute of Health (NIH) as
+part of the NeuroJSON project (https://neurojson.org and https://neurojson.io).
+
+The goal of the NeuroJSON project is to develop scalable, searchable, and
+reusable neuroimaging data formats and data sharing platforms. All data
+produced from the NeuroJSON project will be using JSON/Binary JData formats as the
+underlying serialization standards and the lightweight JData specification as
+language-independent data annotation standard.
 
 ## How to install
 
@@ -102,6 +115,13 @@ newdata=jd.load('test.json')
 newdata
 ```
 
+One can use `loadt` or `savet` to read/write JSON-based data files and `loadb` and `saveb` to
+read/write binary-JSON based data files. By default, JData annotations are automatically decoded
+after loading and encoded before saving. One can set `{'encode': False}` in the save functions
+or `{'decode': False}` in the load functions as the `opt` to disable further processing of JData
+annotations. We also provide `loadts` and `loadbs` for parsing a string-buffer made of text-based
+JSON or binary JSON stream.
+
 PyJData supports multiple N-D array data compression/decompression methods (i.e. codecs), similar
 to HDF5 filters. Currently supported codecs include `zlib`, `gzip`, `lz4`, `lzma`, `base64` and various
 `blosc2` compression methods, including `blosc2blosclz`, `blosc2lz4`, `blosc2lz4hc`, `blosc2zlib`,
@@ -111,6 +131,104 @@ decompress the data based on the `_ArrayZipType_` annotation present in the data
 compression methods support multi-threading. To set the thread number, one should define an `nthread`
 value in the option (`opt`) for both encoding and decoding.
 
+## Reading JSON via REST-API
+
+If a REST-API (URL) is given as the first input of `load`, it reads the JSON data directly
+from the URL and parse the content to native Python data structures. To avoid repetitive download,
+`load` automatically cache the downloaded file so that future calls directly load the
+locally cached file. If one prefers to always load from the URL without local cache, one should
+use `loadurl()` instead. Here is an example
+
+```
+import jdata as jd
+data = jd.load('https://neurojson.io:7777/openneuro/ds000001');
+data.keys()
+```
+
+## Using JSONPath to access and query complex datasets
+
+Starting from v0.6.0, PyJData provides a lightweight implementation [JSONPath](https://goessner.net/articles/JsonPath/),
+a widely used format for query and access a hierarchical dict/list structure, such as those
+parsed by `load` or `loadurl`. Here is an example
+
+```
+import jdata as jd
+
+data = jd.loadurl('https://raw.githubusercontent.com/fangq/jsonlab/master/examples/example1.json');
+jd.jsonpath(data, '$.age')
+jd.jsonpath(data, '$.address.city')
+jd.jsonpath(data, '$.phoneNumber')
+jd.jsonpath(data, '$.phoneNumber[0]')
+jd.jsonpath(data, '$.phoneNumber[0].type')
+jd.jsonpath(data, '$.phoneNumber[-1]')
+jd.jsonpath(data, '$.phoneNumber..number')
+jd.jsonpath(data, '$[phoneNumber][type]')
+jd.jsonpath(data, '$[phoneNumber][type][1]')
+```
+
+The `jd.jsonpath` function does not support all JSONPath features. If more complex JSONPath
+queries are needed, one should install `jsonpath_ng` or other more advanced JSONPath support.
+Here is an example using `jsonpath_ng`
+
+```
+import jdata as jd
+from jsonpath_ng.ext import parse
+
+data = jd.loadurl('https://raw.githubusercontent.com/fangq/jsonlab/master/examples/example1.json');
+
+val = [match.value for match in parse('$.address.city').find(data)]
+val = [match.value for match in parse('$.phoneNumber').find(data)]
+```
+
+## Downloading and caching `_DataLink_` referenced external data files
+
+Similarly to [JSONLab](https://github.com/fangq/jsonlab?tab=readme-ov-file#jsoncachem),
+PyJData also provides similar external data file downloading/caching capability.
+
+The `_DataLink_` annotation in the JData specification permits linking of external data files
+in a JSON file - to make downloading/parsing externally linked data files efficient, such as
+processing large neuroimaging datasets hosted on http://neurojson.io, we have developed a system
+to download files on-demand and cache those locally. jsoncache.m is responsible of searching
+the local cache folders, if found the requested file, it returns the path to the local cache;
+if not found, it returns a SHA-256 hash of the URL as the file name, and the possible cache folders
+
+When loading a file from URL, below is the order of cache file search paths, ranking in search order
+```
+   global-variable NEUROJSON_CACHE | if defined, this path will be searched first
+   [pwd '/.neurojson']  	   | on all OSes
+   /home/USERNAME/.neurojson	   | on all OSes (per-user)
+   /home/USERNAME/.cache/neurojson | if on Linux (per-user)
+   /var/cache/neurojson 	   | if on Linux (system wide)
+   /home/USERNAME/Library/neurojson| if on MacOS (per-user)
+   /Library/neurojson		   | if on MacOS (system wide)
+   C:\ProgramData\neurojson	   | if on Windows (system wide)
+```
+When saving a file from a URL, under the root cache folder, subfolders can be created;
+if the URL is one of a standard NeuroJSON.io URLs as below
+```
+   https://neurojson.org/io/stat.cgi?action=get&db=DBNAME&doc=DOCNAME&file=sub-01/anat/datafile.nii.gz
+   https://neurojson.io:7777/DBNAME/DOCNAME
+   https://neurojson.io:7777/DBNAME/DOCNAME/datafile.suffix
+```
+the file datafile.nii.gz will be downloaded to /home/USERNAME/.neurojson/io/DBNAME/DOCNAME/sub-01/anat/ folder
+if a URL does not follow the neurojson.io format, the cache folder has the below form
+```
+   CACHEFOLDER{i}/domainname.com/XX/YY/XXYYZZZZ...
+```
+where XXYYZZZZ.. is the SHA-256 hash of the full URL, XX is the first two digit, YY is the 3-4 digits
+
+In PyJData, we provide `jdata.jdlink()` function to dynamically download and locally cache
+externally linked data files. `jdata.jdlink()` only parse files with JSON/binary JSON suffixes that
+`load` supports. Here is a example
+
+```
+import jdata as jd
+
+data = jd.load('https://neurojson.io:7777/openneuro/ds000001');
+extlinks = jd.jsonpath(data, '$..anat.._DataLink_')  # deep-scan of all anatomical folders and find all linked NIfTI files
+jd.jdlink(extlinks, {'regex': 'sub-0[12]_.*nii'})  # download only the nii files for sub-01 and sub-02
+jd.jdlink(extlinks)                                # download all links
+```
 
 ## Utility
 
