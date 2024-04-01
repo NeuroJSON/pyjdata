@@ -9,6 +9,7 @@ __all__ = [
     "save",
     "loadurl",
     "show",
+    "dumpb",
     "loadt",
     "savet",
     "loadts",
@@ -234,6 +235,23 @@ def show(data, opt={}, **kwargs):
         return str
     else:
         print(str)
+
+
+def dumpb(data, opt={}, **kwargs):
+    """@brief Printing native python data in binary JSON stream
+
+    @param[in] data: data to be saved
+    @param[in] opt: options, if opt['encode']=True or 1 (default), call jdata.encode() before printing
+    """
+
+    try:
+        import bjdata
+    except ImportError:
+        raise ImportError(
+            'To read/write binary JData files, you must install the bjdata module by "pip install bjdata"'
+        )
+    else:
+        return bjdata.dumpb(data)
 
 
 ##====================================================================================

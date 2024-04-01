@@ -76,7 +76,7 @@ def getonelevel(input_data, paths, pathid, opt):
 
                 if arrayrange["start"] is not None:
                     if arrayrange["start"] < 0:
-                        arrayrange["start"] = len(input_data) + arrayrange["start"]
+                        arrayrange["start"] = len(input_data) + arrayrange["start"] + 1
                     else:
                         arrayrange["start"] += 1
                 else:
@@ -84,7 +84,7 @@ def getonelevel(input_data, paths, pathid, opt):
 
                 if arrayrange["end"] is not None:
                     if arrayrange["end"] < 0:
-                        arrayrange["end"] = len(input_data) + arrayrange["end"]
+                        arrayrange["end"] = len(input_data) + arrayrange["end"] + 1
                     else:
                         arrayrange["end"] += 1
                 else:
@@ -97,7 +97,7 @@ def getonelevel(input_data, paths, pathid, opt):
                 firstidx += 1
             arrayrange["start"] = arrayrange["end"] = firstidx
         elif re.match(r"^\*$", arraystr):
-            pass
+            arrayrange = {"start": 1, "end": len(input_data)}
 
         if (
             "arrayrange" in locals()
@@ -117,7 +117,13 @@ def getonelevel(input_data, paths, pathid, opt):
                     item, paths[:pathid] + [searchkey], pathid, opt
                 )
                 if isfound:
-                    newobj.extend(val)
+                    if isinstance(val, list):
+                        if len(val) > 1:
+                            newobj.extend(val)
+                        else:
+                            newobj.append(val)
+                    else:
+                        newobj.append(val)
             if newobj:
                 obj = newobj
             if isinstance(obj, list) and len(obj) == 1:
@@ -130,7 +136,6 @@ def getonelevel(input_data, paths, pathid, opt):
         if stpath in input_data:
             obj = [input_data[stpath]]
 
-        deepscan = False
         if obj is None or deepscan:
             items = input_data.keys()
 
@@ -141,7 +146,10 @@ def getonelevel(input_data, paths, pathid, opt):
                 if isfound:
                     obj = obj or []
                     if isinstance(val, list):
-                        obj.extend(val)
+                        if len(val) > 1:
+                            obj.extend(val)
+                        else:
+                            obj.append(val)
                     else:
                         obj.append(val)
 
