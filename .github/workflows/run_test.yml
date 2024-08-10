@@ -32,4 +32,4 @@ jobs:
           python -m unittest discover -v test
       - name: Codec benchmark
         run: |
-          python test/benchcodecs.py
+          python -m benchcodecs
