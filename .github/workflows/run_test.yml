@@ -22,7 +22,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install numpy backports.lzma setuptools
+          pip install numpy backports.lzma setuptools bjdata
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
       - name: Build sdist
         run: |
@@ -30,3 +30,6 @@ jobs:
       - name: Basic test
         run: |
           python -m unittest discover -v test
+      - name: Codec benchmark
+        run: |
+          python test/benchcodecs.py
