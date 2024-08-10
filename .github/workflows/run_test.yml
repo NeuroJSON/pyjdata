@@ -32,6 +32,6 @@ jobs:
           python -m unittest discover -v test
       - name: Codec benchmark
         run: |
-          pip install bjdata lz4
+          pip install bjdata lz4 blosc2
           cp -a test/benchcodecs.py .
           python -m benchcodecs
