@@ -200,7 +200,7 @@ def encode(d, opt={}):
                         blosc2nthread = opt["nthread"]
                     newobj["_ArrayZipData_"] = blosc2.compress2(
                         newobj["_ArrayZipData_"],
-                        compcode=BLOSC2CODEC[opt["compression"]],
+                        codec=BLOSC2CODEC[opt["compression"]],
                         typesize=d.dtype.itemsize,
                         nthreads=blosc2nthread,
                     )
