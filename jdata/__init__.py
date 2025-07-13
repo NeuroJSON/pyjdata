@@ -51,6 +51,21 @@ from .jfile import (
 )
 from .jdata import encode, decode, jdtype, jsonfilter
 from .jpath import jsonpath
+from .jnifti import (
+    nii2jnii,
+    jnii2nii,
+    loadnifti,
+    loadjnifti,
+    savenifti,
+    savejnifti,
+    nifticreate,
+    jnifticreate,
+    memmapstream,
+    niiheader2jnii,
+    niicodemap,
+    niiformat,
+)
+from .h5 import loadh5, saveh5
 
 __version__ = "0.6.0"
 __all__ = [
@@ -73,6 +88,20 @@ __all__ = [
     "jsonfilter",
     "jext",
     "jsonpath",
+    "nii2jnii",
+    "jnii2nii",
+    "loadnifti",
+    "loadjnifti",
+    "savenifti",
+    "savejnifti",
+    "nifticreate",
+    "jnifticreate",
+    "memmapstream",
+    "niiheader2jnii",
+    "niicodemap",
+    "niiformat",
+    "loadh5",
+    "saveh5",
 ]
 __license__ = """Apache license 2.0, Copyright (c) 2019-2024 Qianqian Fang"""
 

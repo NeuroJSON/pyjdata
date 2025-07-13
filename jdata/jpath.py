@@ -19,7 +19,6 @@ import copy
 
 
 def jsonpath(root, jpath, opt={}):
-
     obj = root
     jpath = re.sub(r"([^.\]])(\[[-0-9:\*]+\])", r"\1.\2", jpath)
     jpath = re.sub(r"\[[\'\"]*([^]\'\"]+)[\'\"]*\]", r".[\1]", jpath)
@@ -42,7 +41,6 @@ def jsonpath(root, jpath, opt={}):
 
 
 def getonelevel(input_data, paths, pathid, opt):
-
     opt.setdefault("inplace", False)
 
     pathname = paths[pathid]
