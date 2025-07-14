@@ -671,120 +671,163 @@ def niiformat(format):
 
 
 def niicodemap(name, value):
-    lut = {
-        "intent_code": {
-            0: "",
-            2: "corr",
-            3: "ttest",
-            4: "ftest",
-            5: "zscore",
-            6: "chi2",
-            7: "beta",
-            8: "binomial",
-            9: "gamma",
-            10: "poisson",
-            11: "normal",
-            12: "ncftest",
-            13: "ncchi2",
-            14: "logistic",
-            15: "laplace",
-            16: "uniform",
-            17: "ncttest",
-            18: "weibull",
-            19: "chi",
-            20: "invgauss",
-            21: "extval",
-            22: "pvalue",
-            23: "logpvalue",
-            24: "log10pvalue",
-            25: "estimate",
-            26: "label",
-            27: "neuronames",
-            28: "matrix",
-            29: "symmatrix",
-            30: "dispvec",
-            31: "vector",
-            32: "point",
-            33: "triangle",
-            34: "quaternion",
-            35: "unitless",
-            36: "tseries",
-            37: "elem",
-            38: "rgb",
-            39: "rgba",
-            40: "shape",
-        },
-        "slice_code": {
-            0: "",
-            1: "seq+",
-            2: "seq-",
-            3: "alt+",
-            4: "alt-",
-            5: "alt2+",
-            6: "alt-",
-        },
-        "datatype": {
-            0: "",
-            2: "uint8",
-            4: "int16",
-            8: "int32",
-            16: "single",
-            32: "complex64",
-            64: "double",
-            128: "rgb24",
-            256: "int8",
-            512: "uint16",
-            768: "uint32",
-            1024: "int64",
-            1280: "uint64",
-            1536: "double128",
-            1792: "complex128",
-            2048: "complex256",
-            2304: "rgba32",
-        },
-        "xyzt_units": {
-            0: "",
-            1: "m",
-            2: "mm",
-            3: "um",
-            8: "s",
-            16: "ms",
-            24: "us",
-            32: "hz",
-            40: "ppm",
-            48: "rad",
-        },
-        "qform": {0: "", 1: "scanner", 2: "aligned", 3: "talairach", 4: "mni"},
-        "unit": {},
-        "sform": {},
-        "slicetype": {},
-        "intent": {},
+    """
+    Convert between NIFTI numeric codes and human-readable string header values.
+
+    Parameters
+    ----------
+    name : str
+        The NIFTI field name. Supports:
+        'intent_code', 'slice_code', 'datatype', 'qform_code',
+        'sform_code', 'xyzt_units', 'unit', 'Intent', 'SliceType',
+        'DataType', 'QForm', 'SForm'
+    value : str or int
+        A string name or numeric code to convert.
+
+    Returns
+    -------
+    newval : int or str
+        Mapped value in the opposite domain of the input.
+    """
+
+    from collections import defaultdict
+
+    # Lookup table: code -> name
+    lut = defaultdict(dict)
+    lut["intent_code"] = {
+        0: "",
+        2: "corr",
+        3: "ttest",
+        4: "ftest",
+        5: "zscore",
+        6: "chi2",
+        7: "beta",
+        8: "binomial",
+        9: "gamma",
+        10: "poisson",
+        11: "normal",
+        12: "ncftest",
+        13: "ncchi2",
+        14: "logistic",
+        15: "laplace",
+        16: "uniform",
+        17: "ncttest",
+        18: "weibull",
+        19: "chi",
+        20: "invgauss",
+        21: "extval",
+        22: "pvalue",
+        23: "logpvalue",
+        24: "log10pvalue",
+        1001: "estimate",
+        1002: "label",
+        1003: "neuronames",
+        1004: "matrix",
+        1005: "symmatrix",
+        1006: "dispvec",
+        1007: "vector",
+        1008: "point",
+        1009: "triangle",
+        1010: "quaternion",
+        1011: "unitless",
+        2001: "tseries",
+        2002: "elem",
+        2003: "rgb",
+        2004: "rgba",
+        2005: "shape",
+        2006: "fsl_fnirt_displacement_field",
+        2007: "fsl_cubic_spline_coefficients",
+        2008: "fsl_dct_coefficients",
+        2009: "fsl_quadratic_spline_coefficients",
+        2016: "fsl_topup_cubic_spline_coefficients",
+        2017: "fsl_topup_quadratic_spline_coefficients",
+        2018: "fsl_topup_field",
     }
 
-    tul = {
-        "intent_code": {},
-        "slice_code": {},
-        "datatype": {},
-        "xyzt_units": {},
-        "qform": {},
-        "sform": {},
-        "slicetype": {},
-        "intent": {},
-        "unit": {},
+    lut["slice_code"] = {
+        0: "",
+        1: "seq+",
+        2: "seq-",
+        3: "alt+",
+        4: "alt-",
+        5: "alt2+",
+        6: "alt-",
     }
 
-    for key, value in lut.items():
-        tul[key] = {v: k for k, v in value.items()}
+    lut["datatype"] = {
+        0: "",
+        2: "uint8",
+        4: "int16",
+        8: "int32",
+        16: "single",
+        32: "complex64",
+        64: "double",
+        128: "rgb24",
+        256: "int8",
+        512: "uint16",
+        768: "uint32",
+        1024: "int64",
+        1280: "uint64",
+        1536: "double128",
+        1792: "complex128",
+        2048: "complex256",
+        2304: "rgba32",
+    }
 
-    if name.lower() not in lut:
-        raise ValueError("property can not be found")
+    lut["xyzt_units"] = {
+        0: "",
+        1: "m",
+        2: "mm",
+        3: "um",
+        8: "s",
+        16: "ms",
+        24: "us",
+        32: "hz",
+        40: "ppm",
+        48: "rad",
+    }
 
-    if not isinstance(value, str):
-        newval = lut[name.lower()][value]
-    else:
-        newval = tul[name.lower()][value]
+    lut["qform_code"] = {
+        0: "",
+        1: "scanner_anat",
+        2: "aligned_anat",
+        3: "talairach",
+        4: "mni_152",
+        5: "template_other",
+    }
 
-    return newval
+    # Aliases for consistency
+    lut["sform_code"] = lut["qform_code"]
+    lut["unit"] = lut["xyzt_units"]
+    lut["slicetype"] = lut["slice_code"]
+    lut["intent"] = lut["intent_code"]
+    lut["Intent"] = lut["intent_code"]
+    lut["SliceType"] = lut["slice_code"]
+    lut["DataType"] = lut["datatype"]
+    lut["QForm"] = lut["qform_code"]
+    lut["SForm"] = lut["sform_code"]
+    lut["Unit"] = lut["xyzt_units"]
+
+    name = name.lower()
+
+    if name not in lut:
+        raise ValueError(f"Unsupported field name: {name}")
+
+    if isinstance(value, np.ndarray) and value.size == 1:
+        value = int(value[0])
+
+    if isinstance(value, (int, float)):
+        value = int(value)
+        if value not in lut[name]:
+            raise ValueError(f"Code {value} not found in {name}")
+        return lut[name][value]
+
+    # Reverse LUT: name -> code
+    rev_lut = {v: k for k, v in lut[name].items()}
+
+    if value not in rev_lut:
+        raise ValueError(f"String value '{value}' not found in {name}")
+    return rev_lut[value]
 
 
 def niiheader2jnii(nii0):
@@ -836,8 +879,12 @@ def niiheader2jnii(nii0):
     if "glmax" in nii0["hdr"]:
         nii["NIFTIHeader"]["A75GlobalMax"] = nii0["hdr"]["glmax"]
         nii["NIFTIHeader"]["A75GlobalMin"] = nii0["hdr"]["glmin"]
-    nii["NIFTIHeader"]["Description"] = nii0["hdr"]["descrip"].strip()
-    nii["NIFTIHeader"]["AuxFile"] = nii0["hdr"]["aux_file"].strip()
+    nii["NIFTIHeader"]["Description"] = "".join(
+        map(chr, np.packbits(nii0["hdr"]["descrip"]))
+    ).strip()
+    nii["NIFTIHeader"]["AuxFile"] = "".join(
+        map(chr, np.packbits(nii0["hdr"]["aux_file"]))
+    ).strip()
     nii["NIFTIHeader"]["QForm"] = nii0["hdr"]["qform_code"]
     nii["NIFTIHeader"]["SForm"] = nii0["hdr"]["sform_code"]
     nii["NIFTIHeader"]["Quatern"] = {}
@@ -853,8 +900,12 @@ def niiheader2jnii(nii0):
         nii0["hdr"]["srow_y"],
         nii0["hdr"]["srow_z"],
     ]
-    nii["NIFTIHeader"]["Name"] = nii0["hdr"]["intent_name"].strip()
-    nii["NIFTIHeader"]["NIIFormat"] = nii0["hdr"]["magic"].strip()
+    nii["NIFTIHeader"]["Name"] = "".join(
+        map(chr, np.packbits(nii0["hdr"]["intent_name"]))
+    ).strip()
+    nii["NIFTIHeader"]["NIIFormat"] = "".join(
+        map(chr, np.packbits(nii0["hdr"]["magic"]))
+    ).strip()
     if "extension" in nii0["hdr"]:
         nii["NIFTIHeader"]["NIIExtender"] = nii0["hdr"]["extension"]
     nii["NIFTIHeader"]["NIIQfac_"] = nii0["hdr"]["pixdim"][0]
@@ -1126,29 +1177,62 @@ def jnii2nii(jnii, niifile=None):
 
 
 def bytematch(jobj, key, orig):
+    """
+    Match the field `key` in dictionary `jobj` with the same data type and length as `orig`.
+
+    Parameters
+    ----------
+    jobj : dict
+        Input dictionary representing a JSON-like object.
+    key : str
+        Field name to look for in `jobj`.
+    orig : np.ndarray
+        Original numpy array whose type and shape should be preserved.
+
+    Returns
+    -------
+    dat : np.ndarray
+        Output array matching the type and shape of `orig`, using values from `jobj[key]` if available.
+    """
     dtype = orig.dtype
-    dat = orig
+    dat = orig.copy()
+
     if key in jobj:
         dat = np.array(jobj[key], dtype=dtype)
     else:
-        dat = np.zeros_like(orig, dtype=dtype)
+        dat = np.array([0], dtype=dtype)
+
+    # Pad or trim the result to match the original length
     if dat.size < orig.size:
-        dat = np.pad(dat, (0, orig.size - dat.size), mode="constant")
+        # Extend with zeros
+        padded = np.zeros(orig.size, dtype=dtype)
+        padded[: dat.size] = dat
+        dat = padded
+    else:
+        dat = dat[: orig.size]
+
     return dat
 
 
 def nifticreate(img, format="nifti1"):
     """
-    Create a default NIfTI header
+    Create a default NIfTI header from an image array.
 
-    Args:
-        img: the image data matching the header
-        format: can only be 'nifti1'. can be ignored
+    Parameters
+    ----------
+    img : numpy.ndarray
+        The image data array matching the header to create.
+    format : str, optional
+        Format specifier, only 'nifti1' supported (default).
 
-    Returns:
-        header: a dict that is byte-wise compatible with NIfTI-1
+    Returns
+    -------
+    header : dict
+        Dictionary representing the NIfTI header.
     """
-    datatype = {
+
+    # Map Python/numpy dtypes to NIfTI codes
+    datatype_map = {
         "int8": 256,
         "int16": 4,
         "int32": 8,
@@ -1157,8 +1241,8 @@ def nifticreate(img, format="nifti1"):
         "uint16": 512,
         "uint32": 768,
         "uint64": 1280,
-        "single": 16,
-        "double": 64,
+        "float32": 16,
+        "float64": 64,
     }
 
     if format == "nifti1":
@@ -1166,19 +1250,40 @@ def nifticreate(img, format="nifti1"):
     else:
         headerlen = 540
 
-    header = {}
+    # Create empty header
+    rawbytes = np.zeros(headerlen + 4, dtype=np.uint8)
+    header = memmapstream(rawbytes, niiformat(format))
+
+    # Set values
     header["sizeof_hdr"] = np.array(headerlen, dtype=np.int32)
-    header["datatype"] = np.array(datatype[img.dtype.name], dtype=np.int16)
-    header["dim"] = np.ones(8, dtype=np.int16)
-    header["dim"][0] = np.array(3, dtype=np.int16)
-    header["dim"][1:4] = np.array(img.shape, dtype=np.int16)
-    header["pixdim"] = np.ones(8, dtype=np.float32)
-    header["vox_offset"] = np.array(headerlen + 4, dtype=np.float32)
-    header["magic"] = np.array("ni1\0", dtype="S4")
-    header["srow_x"] = np.array([1, 0, 0, 0], dtype=np.float32)
-    header["srow_y"] = np.array([0, 1, 0, 0], dtype=np.float32)
-    header["srow_z"] = np.array([0, 0, 1, 0], dtype=np.float32)
-    header["sform_code"] = np.array(1, dtype=np.int16)
+    np_dtype_str = str(img.dtype)
+    if np_dtype_str not in datatype_map:
+        raise ValueError(f"Unsupported image data type: {np_dtype_str}")
+    header["datatype"] = np.array(
+        datatype_map[np_dtype_str], dtype=type(header["datatype"])
+    )
+
+    # Fill dim and pixdim
+    ndim = img.ndim
+    shape = img.shape
+    header["dim"] = np.ones(8, dtype=type(header["dim"][0]))
+    header["dim"][0] = ndim
+    header["dim"][1 : ndim + 1] = shape
+    header["pixdim"] = np.ones(8, dtype=type(header["pixdim"][0]))
+
+    header["vox_offset"] = np.array(headerlen + 4, dtype=type(header["vox_offset"]))
+
+    # Set magic
+    if headerlen == 540:
+        header["magic"] = np.frombuffer(b"ni2\x00", dtype=type(header["magic"][0]))
+    else:
+        header["magic"] = np.frombuffer(b"ni1\x00", dtype=type(header["magic"][0]))
+
+    # Set affine transform identity matrix
+    header["srow_x"] = np.array([1, 0, 0, 0], dtype=type(header["srow_x"]))
+    header["srow_y"] = np.array([0, 1, 0, 0], dtype=type(header["srow_y"]))
+    header["srow_z"] = np.array([0, 0, 1, 0], dtype=type(header["srow_z"]))
+    header["sform_code"] = np.array(1, dtype=type(header["sform_code"]))
 
     return header
 
@@ -1374,9 +1479,7 @@ def savejnifti(jnii, filename, *args):
         jd.save(jnii, filename, *args)
 
 
-def memmapstream(
-    bytes_in: Union[bytes, bytearray, np.ndarray], format: list, usemap: bool = False
-):
+def memmapstream(bytes_in: Union[bytes, bytearray, np.ndarray], format: list):
     """
     Map a byte stream into structured data using a format specification.
 
@@ -1389,8 +1492,6 @@ def memmapstream(
             - dtype_str: a string like 'int8', 'float32', etc.
             - shape_tuple: tuple of shape dimensions (e.g. (1, 8))
             - field_name: the name of the output dictionary key
-    usemap : bool, optional
-        If True, return a dict-like object instead of plain dict
 
     Returns
     -------
@@ -1427,7 +1528,7 @@ def memmapstream(
         byte_array = bytes(bytes_in)
 
     offset = 0
-    outstruct = {} if not usemap else dict()
+    outstruct = {}
 
     for dtype_str, shape, field in format:
         count = np.prod(shape)
