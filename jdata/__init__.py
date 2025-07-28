@@ -82,7 +82,7 @@ from .jnifti import (
 )
 from .h5 import loadh5, saveh5
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 __all__ = [
     "load",
     "save",
