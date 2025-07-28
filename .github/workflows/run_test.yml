@@ -33,6 +33,7 @@ jobs:
       - name: Codec benchmark
         run: |
           pip install bjdata lz4 blosc2
+          pip install --upgrade numpy blosc2
           cp -a test/benchcodecs.py .
           python -m benchcodecs
 
