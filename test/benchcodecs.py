@@ -2,7 +2,6 @@
     Speed benchmark for saving/loading numpy arrays using various compression codecs
 """
 import jdata as jd
-import bjdata as bj
 import numpy as np
 import time
 import os

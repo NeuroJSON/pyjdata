@@ -5,7 +5,22 @@ portable JData-spec annotated dict structure
 Copyright (c) 2019-2024 Qianqian Fang <q.fang at neu.edu>
 """
 
-__all__ = ["encode", "decode", "jdtype", "jsonfilter"]
+__all__ = [
+    "encode",
+    "decode",
+    "jdtype",
+    "jsonfilter",
+    "zlibencode",
+    "zlibdecode",
+    "gzipencode",
+    "gzipdecode",
+    "lzmaencode",
+    "lzmadecode",
+    "lz4encode",
+    "lz4decode",
+    "base64encode",
+    "base64decode",
+]
 
 ##====================================================================================
 ## dependent libraries
@@ -67,7 +82,7 @@ _allownumpy = ("_ArraySize_", "_ArrayData_", "_ArrayZipSize_", "_ArrayZipData_")
 ##====================================================================================
 
 
-def encode(d, opt={}):
+def encode(d, opt={}, **kwargs):
     """@brief Encoding a Python data structure to portable JData-annotated dict constructs
 
     This function converts complex data types (usually not JSON-serializable) into
@@ -82,6 +97,7 @@ def encode(d, opt={}):
     """
 
     opt.setdefault("inplace", False)
+    opt.update(kwargs)
 
     if "compression" in opt:
         if opt["compression"] == "lzma":
@@ -166,6 +182,7 @@ def encode(d, opt={}):
             elif opt["compression"] == "gzip":
                 gzipper = zlib.compressobj(wbits=(zlib.MAX_WBITS | 16))
                 newobj["_ArrayZipData_"] = gzipper.compress(newobj["_ArrayZipData_"])
+                newobj["_ArrayZipData_"] += gzipper.flush()
             elif opt["compression"] == "lzma":
                 try:
                     newobj["_ArrayZipData_"] = lzma.compress(
@@ -224,7 +241,7 @@ def encode(d, opt={}):
 ##====================================================================================
 
 
-def decode(d, opt={}):
+def decode(d, opt={}, **kwargs):
     """@brief Decoding a JData-annotated dict construct into native Python data
 
     This function converts portable JData-annotated dict/list constructs back to native Python
@@ -237,6 +254,7 @@ def decode(d, opt={}):
 
     opt.setdefault("inplace", False)
     opt.setdefault("maxlinklevel", 0)
+    opt.update(kwargs)
 
     if (
         (isinstance(d, str) or type(d) == "unicode")
@@ -458,6 +476,115 @@ def decodelist(d0, opt={}):
     for i, s in enumerate(d):
         d[i] = decode(s, opt)
     return d
+
+
+# -------------------------------------------------------------------------------------
+
+
+def zlibencode(buf):
+    return zlib.compress(buf)
+
+
+# -------------------------------------------------------------------------------------
+
+
+def gzipencode(buf):
+    gzipper = zlib.compressobj(wbits=(zlib.MAX_WBITS | 16))
+    newbuf = gzipper.compress(buf)
+    newbuf += gzipper.flush()
+    return newbuf
+
+
+# -------------------------------------------------------------------------------------
+
+
+def lzmaencode(buf):
+    try:
+        try:
+            import lzma
+        except ImportError:
+            from backports import lzma
+    except Exception:
+        raise Exception(
+            "JData",
+            'you must install "lzma" module to compress with this format',
+        )
+    return lzma.compress(buf, lzma.FORMAT_ALONE)
+
+
+# -------------------------------------------------------------------------------------
+
+
+def lz4encode(buf):
+    try:
+        import lz4.frame
+    except ImportError:
+        raise Exception(
+            "JData",
+            'you must install "lz4" module to compress with this format',
+        )
+    return lz4.compress(buf.tobytes(), lzma.FORMAT_ALONE)
+
+
+# -------------------------------------------------------------------------------------
+
+
+def base64encode(buf):
+    return base64.b64encode(buf)
+
+
+# -------------------------------------------------------------------------------------
+
+
+def zlibdecode(buf):
+    return zlib.decompress(buf)
+
+
+# -------------------------------------------------------------------------------------
+
+
+def gzipdecode(buf):
+    return zlib.decompress(bytes(buf), zlib.MAX_WBITS | 32)
+
+
+# -------------------------------------------------------------------------------------
+
+
+def lzmadecode(buf):
+    try:
+        try:
+            import lzma
+        except ImportError:
+            from backports import lzma
+    except Exception:
+        raise Exception(
+            "JData",
+            'you must install "lzma" module to compress with this format',
+        )
+    newbuf = bytearray(buf)  # set length to -1 (unknown) if EOF appears
+    newbuf[5:13] = b"\xff\xff\xff\xff\xff\xff\xff\xff"
+    return lzma.decompress(newbuf, lzma.FORMAT_ALONE)
+
+
+# -------------------------------------------------------------------------------------
+
+
+def lz4decode(buf):
+    try:
+        import lz4.frame
+    except ImportError:
+        raise Exception(
+            "JData",
+            'you must install "lz4" module to compress with this format',
+        )
+    return lz4.frame.decompress(bytes(buf))
+
+
+# -------------------------------------------------------------------------------------
+
+
+def base64decode(buf):
+    return base64.b64decode(buf)
 
 
 # -------------------------------------------------------------------------------------

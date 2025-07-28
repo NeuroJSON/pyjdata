@@ -49,7 +49,22 @@ from .jfile import (
     jdlink,
     jext,
 )
-from .jdata import encode, decode, jdtype, jsonfilter
+from .jdata import (
+    encode,
+    decode,
+    jdtype,
+    jsonfilter,
+    zlibencode,
+    zlibdecode,
+    gzipencode,
+    gzipdecode,
+    lzmaencode,
+    lzmadecode,
+    lz4encode,
+    lz4decode,
+    base64encode,
+    base64decode,
+)
 from .jpath import jsonpath
 from .jnifti import (
     nii2jnii,
@@ -102,6 +117,16 @@ __all__ = [
     "niiformat",
     "loadh5",
     "saveh5",
+    "zlibencode",
+    "zlibdecode",
+    "gzipencode",
+    "gzipdecode",
+    "lzmaencode",
+    "lzmadecode",
+    "lz4encode",
+    "lz4decode",
+    "base64encode",
+    "base64decode",
 ]
 __license__ = """Apache license 2.0, Copyright (c) 2019-2024 Qianqian Fang"""
 

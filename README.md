@@ -2,7 +2,7 @@
 
 # JData for Python - lightweight and serializable data annotations for Python
 
-- Copyright: (C) Qianqian Fang (2019-2024) <q.fang at neu.edu>
+- Copyright: (C) Qianqian Fang (2019-2025) <q.fang at neu.edu>
 - License: Apache License, Version 2.0
 - Version: 0.6.0
 - URL: https://github.com/NeuroJSON/pyjdata
@@ -65,23 +65,23 @@ are no longer supported.
 One can also install this module from the source code. To do this, you first
 check out a copy of the latest code from Github by
 ```
-    git clone https://github.com/NeuroJSON/pyjdata.git
-    cd pyjdata
+git clone https://github.com/NeuroJSON/pyjdata.git
+cd pyjdata
 ```
 then install the module to your local user folder by
 ```
-    python3 setup.py install --user
+python3 setup.py install --user
 ```
 or, if you prefer, install to the system folder for all users by
 ```
-    sudo python3 setup.py install
+sudo python3 setup.py install
 ```
 Please replace `python` by `python3` if you want to install it for Python 3.x instead of 2.x.
 
 Instead of installing the module, you can also import the jdata module directly from 
 your local copy by cd the root folder of the unzipped pyjdata package, and run
 ```
-   import jdata as jd
+import jdata as jd
 ```
 
 ## How to use

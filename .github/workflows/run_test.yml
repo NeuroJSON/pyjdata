@@ -3,7 +3,7 @@ name: Test JData
 on: [push]
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-22.04
     strategy:
       matrix:
@@ -35,3 +35,30 @@ jobs:
           pip install bjdata lz4 blosc2
           cp -a test/benchcodecs.py .
           python -m benchcodecs
+
+  deploy:
+    runs-on: ubuntu-22.04
+    needs: test
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+        with:
+          submodules: 'recursive'
+      - name: Install build
+        run: python3 -m pip install --upgrade build
+      - name: Build wheel
+        run: |
+          python3 -m build
+      - name: Check If the Build Version Exists on PyPI
+        id: perform_pypi_upload_check
+        shell: bash
+        run: |
+          $GITHUB_WORKSPACE/.github/check-pypi-upload.sh
+      - name: Upload packages to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        if: ${{ github.actor == 'fangq' && steps.perform_pypi_upload_check.outputs.perform_pypi_upload == 1  && github.event_name != 'pull_request'}}
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          verify_metadata: false
+          verbose: true
+          skip_existing: true
