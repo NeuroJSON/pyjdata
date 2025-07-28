@@ -34,6 +34,12 @@ to restore the original data types
 """
 
 from .jfile import (
+    loadjson,
+    savejson,
+    loadbj,
+    savebj,
+    loadjd,
+    savejd,
     load,
     save,
     loadurl,
@@ -50,6 +56,8 @@ from .jfile import (
     jext,
 )
 from .jdata import (
+    jdataencode,
+    jdatadecode,
     encode,
     decode,
     jdtype,
@@ -82,8 +90,16 @@ from .jnifti import (
 )
 from .h5 import loadh5, saveh5
 
-__version__ = "0.7.0"
+__version__ = "0.7.1"
 __all__ = [
+    "loadjson",
+    "savejson",
+    "loadbj",
+    "savebj",
+    "loadjd",
+    "savejd",
+    "jdataencode",
+    "jdatadecode",
     "load",
     "save",
     "loadurl",

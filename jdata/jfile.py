@@ -5,6 +5,12 @@ Copyright (c) 2019-2024 Qianqian Fang <q.fang at neu.edu>
 """
 
 __all__ = [
+    "loadjson",
+    "savejson",
+    "loadbj",
+    "savebj",
+    "loadjd",
+    "savejd",
     "load",
     "save",
     "loadurl",
@@ -509,3 +515,27 @@ def downloadlink(uripath, opt={}, **kwargs):
         if ext in jext["t"] or ext in jext["b"]:
             newdata = jd.load(fname, opt)
     return newdata, fname, cachepath
+
+
+def loadjson(fname, **kwargs):
+    return loadt(fname, **kwargs)
+
+
+def savejson(fname, **kwargs):
+    return savet(fname, **kwargs)
+
+
+def loadbj(fname, **kwargs):
+    return loadb(fname, **kwargs)
+
+
+def savebj(fname, **kwargs):
+    return saveb(fname, **kwargs)
+
+
+def loadjd(fname, **kwargs):
+    return load(fname, **kwargs)
+
+
+def savejd(fname, **kwargs):
+    return save(fname, **kwargs)

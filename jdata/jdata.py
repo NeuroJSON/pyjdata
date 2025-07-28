@@ -8,6 +8,8 @@ Copyright (c) 2019-2024 Qianqian Fang <q.fang at neu.edu>
 __all__ = [
     "encode",
     "decode",
+    "jdataencode",
+    "jdatadecode",
     "jdtype",
     "jsonfilter",
     "zlibencode",
@@ -585,6 +587,20 @@ def lz4decode(buf):
 
 def base64decode(buf):
     return base64.b64decode(buf)
+
+
+# -------------------------------------------------------------------------------------
+
+
+def jdataencode(obj, **kwargs):
+    return encode(obj, **kwargs)
+
+
+# -------------------------------------------------------------------------------------
+
+
+def jdatadecode(obj, **kwargs):
+    return decode(obj, **kwargs)
 
 
 # -------------------------------------------------------------------------------------
