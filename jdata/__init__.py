@@ -87,6 +87,8 @@ from .jnifti import (
     niiheader2jnii,
     niicodemap,
     niiformat,
+    savejnii,
+    savebnii,
 )
 from .h5 import loadh5, saveh5
 
@@ -131,6 +133,8 @@ __all__ = [
     "niiheader2jnii",
     "niicodemap",
     "niiformat",
+    "savebnii",
+    "savejnii",
     "loadh5",
     "saveh5",
     "zlibencode",

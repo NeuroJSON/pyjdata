@@ -17,6 +17,8 @@ __all__ = [
     "niiheader2jnii",
     "niicodemap",
     "niiformat",
+    "savejnii",
+    "savebnii",
 ]
 
 ##====================================================================================
@@ -170,9 +172,13 @@ def nii2jnii(filename, format="jnii", *varargin):
         return nii
 
     if type2str[typeidx][1] > 1:
-        nii["hdr"]["dim"] = [nii["hdr"]["dim"][0] + 1, np.uint16(nii["datalen"])] + nii[
-            "hdr"
-        ]["dim"][2:]
+        nii["hdr"]["dim"] = np.hstack(
+            (
+                nii["hdr"]["dim"][0] + 1,
+                np.uint16(nii["datalen"]),
+                nii["hdr"]["dim"][1:-1],
+            )
+        )
 
     if len(varargin) > 0 and varargin[0] == "niiheader":
         return nii
@@ -1555,3 +1561,17 @@ def memmapstream(bytes_in: Union[bytes, bytearray, np.ndarray], format: list):
         offset += nbytes
 
     return outstruct
+
+
+def savejnii(*args, **kwargs):
+    """
+    Alias for jd.save
+    """
+    return jd.save(*args, **kwargs)
+
+
+def savebnii(*args, **kwargs):
+    """
+    Alias for jd.save
+    """
+    return jd.save(*args, **kwargs)
