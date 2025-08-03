@@ -2,6 +2,8 @@
 
 Provides a routine for converting text-/binary-based JData files to Python data.
 
+Copyright (c) 2019-2025 Qianqian Fang <q.fang at neu.edu>
+
 Call
 
     python -mjdata -h
@@ -11,9 +13,9 @@ to get help with command line usage.
 
 import argparse
 import os
-import sys
+from sys import exit  # pylint: disable=redefined-builtin
 
-from . import load, save, jext
+from .jfile import loadjd, savejd, jext
 
 
 def main():
@@ -30,6 +32,14 @@ def main():
         nargs="+",
         help="path to a text-JData (json/jdt/jnii/jmsh/jnirs) file or a binary JData (bjd/jdb/bnii/bmsh/bnirs) file",
     )
+
+    parser.add_argument(
+        "-t",
+        "--indent",
+        type=int,
+        help="JSON indentation size",
+    )
+
     parser.add_argument(
         "-f",
         "--force",
@@ -38,62 +48,71 @@ def main():
         default=False,
         help="overwrite existing files when converting",
     )
-    parser.add_argument(
-        "-r",
-        "--remove_input",
-        action="store_const",
-        const=True,
-        default=False,
-        help="delete the input file name after conversion",
-    )
+
     parser.add_argument(
         "-c",
         "--compression",
-        default="",
-        help="set compression method (zlib,gzip,lzma,lz4)",
+        default="zlib",
+        help="set compression method (zlib, gzip, lzma, lz4)",
+    )
+
+    parser.add_argument(
+        "-O",
+        "--outdir",
+        help="output directory",
+    )
+
+    parser.add_argument(
+        "-s",
+        "--suffix",
+        help="output file suffix",
     )
 
     args = parser.parse_args()
 
     for path in args.file:
-        spl = os.path.splitext(path)
-        ext = spl[1].lower()
+        pathname, fullfilename = os.path.split(path)
+        filename, extname = os.path.splitext(fullfilename)
+        ext = extname.lower()
+
+        if pathname is None:
+            pathname = "."
 
         if ext in jext["t"]:
-            dest = spl[0] + ".jdb"
+            dest = os.path.join(
+                (args.outdir if args.outdir else pathname),
+                filename + (args.suffix if args.suffix else ".jdb"),
+            )
             try:
                 if os.path.exists(dest) and not args.force:
                     raise Exception("File {} already exists.".format(dest))
-                data = load(path)
-                if len(args.compression) > 0:
-                    save(data, dest, {"compression": args.compression})
-                else:
-                    save(data, dest)
-                if args.remove_input:
-                    os.remove(path)
+                print(f"converting '{path}' to '{dest}'")
+
+                data = loadjd(path)
+                savejd(data, dest, **(vars(args)))
+
             except Exception as e:
                 print("Error: {}".format(e))
-                sys.exit(1)
+                exit(1)
 
         elif ext in jext["b"]:
-            dest = spl[0] + ".json"
+            dest = os.path.join(
+                (args.outdir if args.outdir else pathname),
+                filename + (args.suffix if args.suffix else ".json"),
+            )
             try:
                 if os.path.exists(dest) and not args.force:
                     raise Exception("File {} already exists.".format(dest))
-                data = load(path)
-                if len(args.compression) > 0:
-                    save(data, dest, {"compression": args.compression})
-                else:
-                    save(data, dest)
-                if args.remove_input:
-                    os.remove(path)
+                data = loadjd(path)
+                savejd(data, dest, **(vars(args)))
+
             except RuntimeError as e:
                 print("Error: {}".format(e))
-                sys.exit(1)
+                exit(1)
         else:
             print("Unsupported file extension on file: {}".format(path))
-            sys.exit(1)
+            exit(1)
 
 
 if __name__ == "__main__":
-    main()
+    exit(main())

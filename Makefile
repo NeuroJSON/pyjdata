@@ -1,4 +1,3 @@
-
 PY=python3
 
 all: pretty test build
@@ -13,4 +12,4 @@ build:
 
 
 .DEFAULT_GOAL=all
-.PHONY: all pretty test
+.PHONY: all pretty test build

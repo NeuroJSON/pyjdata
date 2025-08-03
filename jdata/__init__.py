@@ -31,6 +31,8 @@ into JData compatible dict-based objects
 
 The JData-encoded data object can then be decoded using ``decode``
 to restore the original data types
+
+Copyright (c) 2019-2025 Qianqian Fang <q.fang at neu.edu>
 """
 
 from .jfile import (
@@ -54,6 +56,14 @@ from .jfile import (
     jsoncache,
     jdlink,
     jext,
+    loadjsnirf,
+    loadsnirf,
+    savejsnirf,
+    savesnirf,
+    loadmsgpack,
+    savemsgpack,
+    loadubjson,
+    saveubjson,
 )
 from .jdata import (
     jdataencode,
@@ -90,9 +100,28 @@ from .jnifti import (
     savejnii,
     savebnii,
 )
-from .h5 import loadh5, saveh5
 
-__version__ = "0.7.1"
+from .h5 import (
+    loadh5,
+    saveh5,
+    regrouph5,
+    aos2soa,
+    soa2aos,
+    jsnirfcreate,
+    snirfcreate,
+    snirfdecode,
+)
+
+from .csv import (
+    load_csv_tsv,
+    loadcsv,
+    loadtsv,
+    save_csv_tsv,
+)
+
+from .neurojson import neuroj, neurojgui
+
+__version__ = "0.8.0"
 __all__ = [
     "loadjson",
     "savejson",
@@ -137,6 +166,16 @@ __all__ = [
     "savejnii",
     "loadh5",
     "saveh5",
+    "regrouph5",
+    "aos2soa",
+    "soa2aos",
+    "jsnirfcreate",
+    "snirfcreate",
+    "loadjsnirf",
+    "loadsnirf",
+    "savejsnirf",
+    "savesnirf",
+    "snirfdecode",
     "zlibencode",
     "zlibdecode",
     "gzipencode",
@@ -147,11 +186,16 @@ __all__ = [
     "lz4decode",
     "base64encode",
     "base64decode",
+    "neuroj",
+    "neurojgui",
+    "load_csv_tsv",
+    "loadcsv",
+    "loadtsv",
+    "save_csv_tsv",
+    "loadmsgpack",
+    "savemsgpack",
+    "loadubjson",
+    "saveubjson",
 ]
-__license__ = """Apache license 2.0, Copyright (c) 2019-2024 Qianqian Fang"""
 
-
-if __name__ == "__main__":
-    import cmd
-
-    cmd.main()
+__license__ = """Apache license 2.0, Copyright (c) 2019-2025 Qianqian Fang"""

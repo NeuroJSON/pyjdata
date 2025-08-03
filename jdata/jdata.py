@@ -2,7 +2,7 @@
 Encoding and decoding python native data structures as
 portable JData-spec annotated dict structure
 
-Copyright (c) 2019-2024 Qianqian Fang <q.fang at neu.edu>
+Copyright (c) 2019-2025 Qianqian Fang <q.fang at neu.edu>
 """
 
 __all__ = [
@@ -34,7 +34,6 @@ import zlib
 import base64
 import os
 import re
-from .jfile import jdlink
 
 ##====================================================================================
 ## global variables
@@ -253,6 +252,8 @@ def decode(d, opt={}, **kwargs):
     @param[in] opt: options, can contain a dict with the following keys
          'nthread': number of decompression thread of the codec is of the blosc2 class, default is 1
     """
+
+    from .jfile import jdlink
 
     opt.setdefault("inplace", False)
     opt.setdefault("maxlinklevel", 0)

@@ -11,25 +11,28 @@ or
 
 in the root folder.
 
-Copyright (c) 2019-2024 Qianqian Fang <q.fang at neu.edu>
+Copyright (c) 2019-2025 Qianqian Fang <q.fang at neu.edu>
 """
 
 import unittest
+import sys
+import os
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from jdata import *
 import numpy as np
-import re
 import warnings
-from collections import OrderedDict
 
 
-def debug_print(data, opt={}):
-    opt.setdefault("string", True)
-    return show(data, opt, separators=(",", ":"))
+def debug_print(data, **kwargs):
+    kwargs.setdefault("string", True)
+    kwargs["separators"] = (",", ":")
+    return show(data, **kwargs)
 
 
-def test_jdata(testname, fhandle, input, expected, *varargs):
-    res = fhandle(input, *varargs)
+def test_jdata(testname, fhandle, input, expected, **varargs):
+    res = fhandle(input, **varargs)
     if not (str(res).strip() == expected):
         warnings.warn(
             f'Test {testname}: failed: expected "{expected}", obtained "{res}"'
@@ -119,21 +122,27 @@ class TestModule(unittest.TestCase):
             debug_print,
             a,
             '{"_ArrayType_":"uint8","_ArraySize_":[20,5],"_ArrayZipType_":"zlib","_ArrayZipSize_":[1,100],"_ArrayZipData_":"eJxjZAABRhwkxQBsDAACIQAH"}',
-            {"compact": 1, "compression": "zlib", "compressarraysize": 0},
+            compact=1,
+            compression="zlib",
+            compressarraysize=0,
         )
         test_jdata(
             "gzip compression (level 6)",
             debug_print,
             a,
             '{"_ArrayType_":"uint8","_ArraySize_":[20,5],"_ArrayZipType_":"gzip","_ArrayZipSize_":[1,100],"_ArrayZipData_":"H4sIAAAAAAAAAw=="}',
-            {"compact": 1, "compression": "gzip", "compressarraysize": 0},
+            compact=1,
+            compression="gzip",
+            compressarraysize=0,
         )
         test_jdata(
             "lzma compression (level 5)",
             debug_print,
             a,
             '{"_ArrayType_":"uint8","_ArraySize_":[20,5],"_ArrayZipType_":"lzma","_ArrayZipSize_":[1,100],"_ArrayZipData_":"XQAAgAD//////////wAAgD1IirvlZSEY7DH///taoAA="}',
-            {"compact": 1, "compression": "lzma", "compressarraysize": 0},
+            compact=1,
+            compression="lzma",
+            compressarraysize=0,
         )
 
     def test_jsonpath(self):

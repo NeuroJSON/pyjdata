@@ -38,7 +38,7 @@ from typing import Union
 from collections import defaultdict
 
 
-def nii2jnii(filename, format="jnii", *varargin):
+def nii2jnii(filename, format="jnii", *varargin, **kwargs):
     hdrfile = filename
     isnii = -1
     if re.search(
@@ -165,7 +165,7 @@ def nii2jnii(filename, format="jnii", *varargin):
     nii["datatype"] = type2str[typeidx][0]
     nii["datalen"] = type2str[typeidx][1]
     nii["voxelbyte"] = type2byte[typeidx, 1]
-    nii["endian"] = dataendian
+    nii["endian"] = "little" if dataendian == "L" else "big"
 
     if type2byte[typeidx, 1] == 0:
         nii["img"] = []
@@ -818,8 +818,11 @@ def niicodemap(name, value):
     if name not in lut:
         raise ValueError(f"Unsupported field name: {name}")
 
-    if isinstance(value, np.ndarray) and value.size == 1:
-        value = int(value[0])
+    if isinstance(value, (np.ndarray, np.generic)) and value.size == 1:
+        if value.ndim == 0:
+            value = int(value)
+        else:
+            value = int(value[0])
 
     if isinstance(value, (int, float)):
         value = int(value)
@@ -916,7 +919,9 @@ def niiheader2jnii(nii0):
     if "extension" in nii0["hdr"]:
         nii["NIFTIHeader"]["NIIExtender"] = nii0["hdr"]["extension"]
     nii["NIFTIHeader"]["NIIQfac_"] = nii0["hdr"]["pixdim"][0]
-    nii["NIFTIHeader"]["NIIEndian_"] = nii0["endian"]
+    nii["NIFTIHeader"]["NIIEndian_"] = "little"
+    if "endian" in nii0:
+        nii["NIFTIHeader"]["NIIEndian_"] = nii0["endian"]
     if "reserved" in nii0["hdr"]:
         nii["NIFTIHeader"]["NIIUnused_"] = nii0["hdr"]["reserved"]
 
@@ -964,6 +969,8 @@ def jnii2nii(jnii, niifile=None):
     if isinstance(jnii, str):
         jnii = loadjnifti(jnii)
 
+    hdr = jnii["NIFTIHeader"].copy()
+
     if not isinstance(jnii, dict):
         raise ValueError(
             "input must be a valid JNIfTI structure (needs both NIFTIHeader and NIFTIData subfields)"
@@ -972,204 +979,126 @@ def jnii2nii(jnii, niifile=None):
     niiformat = "nifti1"
 
     if (
-        "NIIFormat" in jnii["NIFTIHeader"]
-        and jnii["NIFTIHeader"]["NIIFormat"][:3] in ["ni2", "n+2"]
-        or np.max(jnii["NIFTIHeader"]["Dim"]) >= 2**32
+        "NIIFormat" in hdr
+        and hdr["NIIFormat"][:3] in ["ni2", "n+2"]
+        or np.max(hdr["Dim"]) >= 2**32
     ):
         niiformat = "nifti2"
 
-    nii = defaultdict()
-    nii["hdr"] = nifticreate(jnii["NIFTIData"], niiformat)
-    nii["img"] = jnii["NIFTIData"]
+    nii = nifticreate(jnii["NIFTIData"], niiformat)
 
-    if "NIIHeaderSize" in jnii["NIFTIHeader"]:
+    if "NIIHeaderSize" in hdr:
         nii["hdr"]["sizeof_hdr"] = bytematch(
-            jnii["NIFTIHeader"], "NIIHeaderSize", nii["hdr"]["sizeof_hdr"]
+            hdr, "NIIHeaderSize", nii["hdr"]["sizeof_hdr"]
         )
     if "data_type" in nii["hdr"]:
         nii["hdr"]["data_type"] = bytematch(
-            jnii["NIFTIHeader"], "A75DataTypeName", nii["hdr"]["data_type"]
+            hdr, "A75DataTypeName", nii["hdr"]["data_type"]
         )
-        nii["hdr"]["db_name"] = bytematch(
-            jnii["NIFTIHeader"], "A75DBName", nii["hdr"]["db_name"]
-        )
-        nii["hdr"]["extents"] = bytematch(
-            jnii["NIFTIHeader"], "A75Extends", nii["hdr"]["extents"]
-        )
+        nii["hdr"]["db_name"] = bytematch(hdr, "A75DBName", nii["hdr"]["db_name"])
+        nii["hdr"]["extents"] = bytematch(hdr, "A75Extends", nii["hdr"]["extents"])
         nii["hdr"]["session_error"] = bytematch(
-            jnii["NIFTIHeader"], "A75SessionError", nii["hdr"]["session_error"]
+            hdr, "A75SessionError", nii["hdr"]["session_error"]
         )
-        nii["hdr"]["regular"] = bytematch(
-            jnii["NIFTIHeader"], "A75Regular", nii["hdr"]["regular"]
-        )
+        nii["hdr"]["regular"] = bytematch(hdr, "A75Regular", nii["hdr"]["regular"])
 
     dim_info = np.bitwise_or(
-        np.uint8(jnii["NIFTIHeader"]["DimInfo"]["Freq"]),
+        np.uint8(hdr["DimInfo"]["Freq"]),
         np.bitwise_or(
-            np.left_shift(np.uint8(jnii["NIFTIHeader"]["DimInfo"]["Phase"]), 3),
-            np.left_shift(np.uint8(jnii["NIFTIHeader"]["DimInfo"]["Slice"]), 6),
+            np.left_shift(np.uint8(hdr["DimInfo"]["Phase"]), 3),
+            np.left_shift(np.uint8(hdr["DimInfo"]["Slice"]), 6),
         ),
     )
     nii["hdr"]["dim_info"] = dim_info.astype(nii["hdr"]["dim_info"].dtype)
 
-    nii["hdr"]["dim"][0] = len(jnii["NIFTIHeader"]["Dim"])
-    nii["hdr"]["dim"][1 : 1 + len(jnii["NIFTIHeader"]["Dim"])] = bytematch(
-        jnii["NIFTIHeader"],
+    nii["hdr"]["dim"][0] = len(hdr["Dim"])
+    nii["hdr"]["dim"][1 : 1 + len(hdr["Dim"])] = bytematch(
+        hdr,
         "Dim",
-        nii["hdr"]["dim"][1 : 1 + len(jnii["NIFTIHeader"]["Dim"])],
+        nii["hdr"]["dim"][1 : 1 + len(hdr["Dim"])],
     )
-    nii["hdr"]["intent_p1"] = bytematch(
-        jnii["NIFTIHeader"], "Param1", nii["hdr"]["intent_p1"]
-    )
-    nii["hdr"]["intent_p2"] = bytematch(
-        jnii["NIFTIHeader"], "Param2", nii["hdr"]["intent_p2"]
-    )
-    nii["hdr"]["intent_p3"] = bytematch(
-        jnii["NIFTIHeader"], "Param3", nii["hdr"]["intent_p3"]
-    )
+    nii["hdr"]["intent_p1"] = bytematch(hdr, "Param1", nii["hdr"]["intent_p1"])
+    nii["hdr"]["intent_p2"] = bytematch(hdr, "Param2", nii["hdr"]["intent_p2"])
+    nii["hdr"]["intent_p3"] = bytematch(hdr, "Param3", nii["hdr"]["intent_p3"])
 
-    if isinstance(jnii["NIFTIHeader"]["Intent"], str):
-        jnii["NIFTIHeader"]["Intent"] = niicodemap(
-            "intent", jnii["NIFTIHeader"]["Intent"]
-        )
-    nii["hdr"]["intent_code"] = bytematch(
-        jnii["NIFTIHeader"], "Intent", nii["hdr"]["intent_code"]
-    )
-    if isinstance(jnii["NIFTIHeader"]["DataType"], str):
-        jnii["NIFTIHeader"]["DataType"] = niicodemap(
-            "datatype", jnii["NIFTIHeader"]["DataType"]
-        )
+    if isinstance(hdr["Intent"], str):
+        hdr["Intent"] = niicodemap("intent", hdr["Intent"])
+    nii["hdr"]["intent_code"] = bytematch(hdr, "Intent", nii["hdr"]["intent_code"])
+    if isinstance(hdr["DataType"], str):
+        hdr["DataType"] = niicodemap("datatype", hdr["DataType"])
 
-    nii["hdr"]["datatype"] = bytematch(
-        jnii["NIFTIHeader"], "DataType", nii["hdr"]["datatype"]
-    )
-    nii["hdr"]["bitpix"] = bytematch(
-        jnii["NIFTIHeader"], "BitDepth", nii["hdr"]["bitpix"]
-    )
+    nii["hdr"]["datatype"] = bytematch(hdr, "DataType", nii["hdr"]["datatype"])
+    nii["hdr"]["bitpix"] = bytematch(hdr, "BitDepth", nii["hdr"]["bitpix"])
     nii["hdr"]["slice_start"] = bytematch(
-        jnii["NIFTIHeader"], "FirstSliceID", nii["hdr"]["slice_start"]
+        hdr, "FirstSliceID", nii["hdr"]["slice_start"]
     )
-    nii["hdr"]["pixdim"][0] = len(jnii["NIFTIHeader"]["VoxelSize"])
+    nii["hdr"]["pixdim"][0] = len(hdr["VoxelSize"])
     nii["hdr"]["pixdim"][1 : 1 + nii["hdr"]["dim"][0] - 1] = bytematch(
-        jnii["NIFTIHeader"],
+        hdr,
         "VoxelSize",
         nii["hdr"]["pixdim"][1 : 1 + nii["hdr"]["dim"][0] - 1],
     )
-    nii["hdr"]["vox_offset"] = bytematch(
-        jnii["NIFTIHeader"], "NIIByteOffset", nii["hdr"]["vox_offset"]
-    )
-    nii["hdr"]["scl_slope"] = bytematch(
-        jnii["NIFTIHeader"], "ScaleSlope", nii["hdr"]["scl_slope"]
-    )
-    nii["hdr"]["scl_inter"] = bytematch(
-        jnii["NIFTIHeader"], "ScaleOffset", nii["hdr"]["scl_inter"]
-    )
-    nii["hdr"]["slice_end"] = bytematch(
-        jnii["NIFTIHeader"], "LastSliceID", nii["hdr"]["slice_end"]
-    )
+    nii["hdr"]["vox_offset"] = bytematch(hdr, "NIIByteOffset", nii["hdr"]["vox_offset"])
+    nii["hdr"]["scl_slope"] = bytematch(hdr, "ScaleSlope", nii["hdr"]["scl_slope"])
+    nii["hdr"]["scl_inter"] = bytematch(hdr, "ScaleOffset", nii["hdr"]["scl_inter"])
+    nii["hdr"]["slice_end"] = bytematch(hdr, "LastSliceID", nii["hdr"]["slice_end"])
 
-    if isinstance(jnii["NIFTIHeader"]["SliceType"], str):
-        jnii["NIFTIHeader"]["SliceType"] = niicodemap(
-            "slicetype", jnii["NIFTIHeader"]["SliceType"]
-        )
-    nii["hdr"]["slice_code"] = bytematch(
-        jnii["NIFTIHeader"], "SliceType", nii["hdr"]["slice_code"]
-    )
-    if isinstance(jnii["NIFTIHeader"]["Unit"]["L"], str):
-        jnii["NIFTIHeader"]["Unit"]["L"] = niicodemap(
-            "unit", jnii["NIFTIHeader"]["Unit"]["L"]
-        )
-    if isinstance(jnii["NIFTIHeader"]["Unit"]["T"], str):
-        jnii["NIFTIHeader"]["Unit"]["T"] = niicodemap(
-            "unit", jnii["NIFTIHeader"]["Unit"]["T"]
-        )
+    if isinstance(hdr["SliceType"], str):
+        hdr["SliceType"] = niicodemap("slicetype", hdr["SliceType"])
+    nii["hdr"]["slice_code"] = bytematch(hdr, "SliceType", nii["hdr"]["slice_code"])
+    if isinstance(hdr["Unit"]["L"], str):
+        hdr["Unit"]["L"] = niicodemap("unit", hdr["Unit"]["L"])
+    if isinstance(hdr["Unit"]["T"], str):
+        hdr["Unit"]["T"] = niicodemap("unit", hdr["Unit"]["T"])
 
     xyzt_units = np.bitwise_or(
-        np.uint8(jnii["NIFTIHeader"]["Unit"]["L"]),
-        np.uint8(jnii["NIFTIHeader"]["Unit"]["T"]),
+        np.uint8(hdr["Unit"]["L"]),
+        np.uint8(hdr["Unit"]["T"]),
     )
     nii["hdr"]["xyzt_units"] = xyzt_units.astype(nii["hdr"]["xyzt_units"].dtype)
 
-    nii["hdr"]["cal_max"] = bytematch(
-        jnii["NIFTIHeader"], "MaxIntensity", nii["hdr"]["cal_max"]
-    )
-    nii["hdr"]["cal_min"] = bytematch(
-        jnii["NIFTIHeader"], "MinIntensity", nii["hdr"]["cal_min"]
-    )
+    nii["hdr"]["cal_max"] = bytematch(hdr, "MaxIntensity", nii["hdr"]["cal_max"])
+    nii["hdr"]["cal_min"] = bytematch(hdr, "MinIntensity", nii["hdr"]["cal_min"])
     nii["hdr"]["slice_duration"] = bytematch(
-        jnii["NIFTIHeader"], "SliceTime", nii["hdr"]["slice_duration"]
+        hdr, "SliceTime", nii["hdr"]["slice_duration"]
     )
-    nii["hdr"]["toffset"] = bytematch(
-        jnii["NIFTIHeader"], "TimeOffset", nii["hdr"]["toffset"]
-    )
+    nii["hdr"]["toffset"] = bytematch(hdr, "TimeOffset", nii["hdr"]["toffset"])
     if "glmax" in nii["hdr"]:
-        nii["hdr"]["glmax"] = bytematch(
-            jnii["NIFTIHeader"], "A75GlobalMax", nii["hdr"]["glmax"]
-        )
-        nii["hdr"]["glmin"] = bytematch(
-            jnii["NIFTIHeader"], "A75GlobalMin", nii["hdr"]["glmin"]
-        )
+        nii["hdr"]["glmax"] = bytematch(hdr, "A75GlobalMax", nii["hdr"]["glmax"])
+        nii["hdr"]["glmin"] = bytematch(hdr, "A75GlobalMin", nii["hdr"]["glmin"])
 
-    nii["hdr"]["descrip"] = bytematch(
-        jnii["NIFTIHeader"], "Description", nii["hdr"]["descrip"]
-    )
-    nii["hdr"]["aux_file"] = bytematch(
-        jnii["NIFTIHeader"], "AuxFile", nii["hdr"]["aux_file"]
-    )
+    nii["hdr"]["descrip"] = bytematch(hdr, "Description", nii["hdr"]["descrip"])
+    nii["hdr"]["aux_file"] = bytematch(hdr, "AuxFile", nii["hdr"]["aux_file"])
 
-    nii["hdr"]["qform_code"] = bytematch(
-        jnii["NIFTIHeader"], "QForm", nii["hdr"]["qform_code"]
-    )
-    nii["hdr"]["sform_code"] = bytematch(
-        jnii["NIFTIHeader"], "SForm", nii["hdr"]["sform_code"]
-    )
-    nii["hdr"]["quatern_b"] = bytematch(
-        jnii["NIFTIHeader"], "Quatern.b", nii["hdr"]["quatern_b"]
-    )
-    nii["hdr"]["quatern_c"] = bytematch(
-        jnii["NIFTIHeader"], "Quatern.c", nii["hdr"]["quatern_c"]
-    )
-    nii["hdr"]["quatern_d"] = bytematch(
-        jnii["NIFTIHeader"], "Quatern.d", nii["hdr"]["quatern_d"]
-    )
+    nii["hdr"]["qform_code"] = bytematch(hdr, "QForm", nii["hdr"]["qform_code"])
+    nii["hdr"]["sform_code"] = bytematch(hdr, "SForm", nii["hdr"]["sform_code"])
+    nii["hdr"]["quatern_b"] = bytematch(hdr["Quatern"], "b", nii["hdr"]["quatern_b"])
+    nii["hdr"]["quatern_c"] = bytematch(hdr["Quatern"], "c", nii["hdr"]["quatern_c"])
+    nii["hdr"]["quatern_d"] = bytematch(hdr["Quatern"], "d", nii["hdr"]["quatern_d"])
     nii["hdr"]["qoffset_x"] = bytematch(
-        jnii["NIFTIHeader"], "QuaternOffset.x", nii["hdr"]["qoffset_x"]
+        hdr["QuaternOffset"], "x", nii["hdr"]["qoffset_x"]
     )
     nii["hdr"]["qoffset_y"] = bytematch(
-        jnii["NIFTIHeader"], "QuaternOffset.y", nii["hdr"]["qoffset_y"]
+        hdr["QuaternOffset"], "y", nii["hdr"]["qoffset_y"]
     )
     nii["hdr"]["qoffset_z"] = bytematch(
-        jnii["NIFTIHeader"], "QuaternOffset.z", nii["hdr"]["qoffset_z"]
-    )
-    nii["hdr"]["srow_x"] = jnii["NIFTIHeader"]["Affine"][0, :].astype(
-        nii["hdr"]["srow_x"].dtype
-    )
-    nii["hdr"]["srow_y"] = jnii["NIFTIHeader"]["Affine"][1, :].astype(
-        nii["hdr"]["srow_y"].dtype
-    )
-    nii["hdr"]["srow_z"] = jnii["NIFTIHeader"]["Affine"][2, :].astype(
-        nii["hdr"]["srow_z"].dtype
+        hdr["QuaternOffset"], "z", nii["hdr"]["qoffset_z"]
     )
 
-    nii["hdr"]["intent_name"] = bytematch(
-        jnii["NIFTIHeader"], "Name", nii["hdr"]["intent_name"]
-    )
-    nii["hdr"]["magic"] = bytematch(
-        jnii["NIFTIHeader"], "NIIFormat", nii["hdr"]["magic"]
-    )
+    affine = np.array(hdr["Affine"])
+    nii["hdr"]["srow_x"] = affine[0].astype(nii["hdr"]["srow_x"].dtype)
+    nii["hdr"]["srow_y"] = affine[1].astype(nii["hdr"]["srow_y"].dtype)
+    nii["hdr"]["srow_z"] = affine[2].astype(nii["hdr"]["srow_z"].dtype)
 
-    if "NIIExtender" in jnii["NIFTIHeader"]:
-        nii["hdr"]["extension"] = bytematch(
-            jnii["NIFTIHeader"], "NIIExtender", nii["hdr"]["extension"]
-        )
-    if "NIIQfac_" in jnii["NIFTIHeader"]:
-        nii["hdr"]["pixdim"][0] = bytematch(
-            jnii["NIFTIHeader"], "NIIQfac_", nii["hdr"]["pixdim"][0]
-        )
-    if "NIIUnused_" in jnii["NIFTIHeader"]:
-        nii["hdr"]["reserved"] = bytematch(
-            jnii["NIFTIHeader"], "NIIUnused_", nii["hdr"]["reserved"]
-        )
+    nii["hdr"]["intent_name"] = bytematch(hdr, "Name", nii["hdr"]["intent_name"])
+    nii["hdr"]["magic"] = bytematch(hdr, "NIIFormat", nii["hdr"]["magic"])
+
+    if "NIIExtender" in hdr:
+        nii["hdr"]["extension"] = bytematch(hdr, "NIIExtender", nii["hdr"]["extension"])
+    if "NIIQfac_" in hdr:
+        nii["hdr"]["pixdim"][0] = bytematch(hdr, "NIIQfac_", nii["hdr"]["pixdim"][0])
+    if "NIIUnused_" in hdr:
+        nii["hdr"]["reserved"] = bytematch(hdr, "NIIUnused_", nii["hdr"]["reserved"])
 
     if "NIFTIExtension" in jnii and isinstance(jnii["NIFTIExtension"], list):
         nii["extension"] = jnii["NIFTIExtension"]
@@ -1208,7 +1137,7 @@ def bytematch(jobj, key, orig):
 
     if key in jobj:
         dat = (
-            np.fromstring(jobj[key], dtype=dtype)
+            np.frombuffer(jobj[key].encode(), dtype=dtype)
             if isinstance(jobj[key], str)
             else np.array(jobj[key], dtype=dtype)
         )
@@ -1227,7 +1156,7 @@ def bytematch(jobj, key, orig):
     return dat
 
 
-def nifticreate(img, format="nifti1"):
+def nifticreate(img, format="nifti1", niihdr0=None, **kwargs):
     """
     Create a default NIfTI header from an image array.
 
@@ -1267,13 +1196,28 @@ def nifticreate(img, format="nifti1"):
     rawbytes = np.zeros(headerlen + 4, dtype=np.uint8)
     header = memmapstream(rawbytes, niiformat(format))
 
+    niihdr = None
+    if niihdr0 is not None:
+        niihdr = niihdr0
+
+    if isinstance(img, dict) and "hdr" in img and "img" in img:
+        if niihdr is None:
+            niihdr = img["hdr"]
+        img = img["img"]
+
+    if niihdr is not None:
+        for k in niihdr:
+            if k in header:
+                header[k] = bytematch(niihdr, k, header[k])
+
     # Set values
     header["sizeof_hdr"] = np.array(headerlen, dtype=np.int32)
     np_dtype_str = str(img.dtype)
+
     if np_dtype_str not in datatype_map:
         raise ValueError(f"Unsupported image data type: {np_dtype_str}")
     header["datatype"] = np.array(
-        datatype_map[np_dtype_str], dtype=type(header["datatype"][0])
+        datatype_map[np_dtype_str], dtype=header["datatype"].dtype
     )
 
     # Fill dim and pixdim
@@ -1284,7 +1228,7 @@ def nifticreate(img, format="nifti1"):
     header["dim"][1 : ndim + 1] = shape
     header["pixdim"] = np.ones(8, dtype=type(header["pixdim"][0]))
 
-    header["vox_offset"] = np.array(headerlen + 4, dtype=type(header["vox_offset"][0]))
+    header["vox_offset"] = np.array(headerlen + 4, dtype=header["vox_offset"].dtype)
 
     # Set magic
     if headerlen == 540:
@@ -1298,9 +1242,15 @@ def nifticreate(img, format="nifti1"):
     header["srow_x"] = np.array([1, 0, 0, 0], dtype=type(header["srow_x"][0]))
     header["srow_y"] = np.array([0, 1, 0, 0], dtype=type(header["srow_y"][0]))
     header["srow_z"] = np.array([0, 0, 1, 0], dtype=type(header["srow_z"][0]))
-    header["sform_code"] = np.array(1, dtype=type(header["sform_code"][0]))
+    header["sform_code"] = np.array(1, dtype=header["sform_code"].dtype)
 
-    return header
+    if kwargs.get("headeronly", False):
+        return header
+
+    nii = defaultdict()
+    nii["hdr"] = header
+    nii["img"] = img
+    return nii
 
 
 def jnifticreate(*args, **kwargs):
@@ -1321,7 +1271,7 @@ def jnifticreate(*args, **kwargs):
             "JNIFTIVersion": "0.5",
             "Comment": "Created by JNIFTY Toolbox (https://github.com/NeuroJSON/jnifty)",
             "AnnotationFormat": "https://github.com/NeuroJSON/jnifti/blob/master/JNIfTI_specification.md",
-            "SerialFormat": "http://json.org",
+            "SerialFormat": "https://json.org",
             "Parser": {
                 "Python": [],
                 "MATLAB": [],
@@ -1371,7 +1321,7 @@ def jnifticreate(*args, **kwargs):
     return jnii
 
 
-def loadjnifti(filename, *args):
+def loadjnifti(filename, *args, **kwargs):
     """
     Load a standard NIFTI-1/2 file or text or binary JNIfTI file with
     format defined in JNIfTI specification: https://github.com/NeuroJSON/jnifti
@@ -1401,25 +1351,25 @@ def loadjnifti(filename, *args):
         )
 
     if filename.endswith(".nii"):
-        nii = loadnifti(filename)
+        nii = loadnifti(filename, **kwargs)
     elif filename.endswith(".jnii"):
         # Assuming loadjson is available from JSONLab
-        jnii = jd.load(filename, *args)
+        jnii = jd.load(filename, *args, **kwargs)
     elif filename.endswith(".bnii"):
         # Assuming loadbj is available from JSONLab
-        jnii = jd.load(filename, *args)
+        jnii = jd.load(filename, *args, **kwargs)
 
     return jnii
 
 
-def loadnifti(*args):
+def loadnifti(*args, **kwargs):
     """
     Alias for nii2jnii
     """
-    return nii2jnii(*args)
+    return nii2jnii(*args, **kwargs)
 
 
-def savenifti(img, filename, *args):
+def savenifti(img, filename, *args, **kwargs):
     """
     Write an image to a NIfTI (*.nii) or compressed NIfTI file (.nii.gz)
 
@@ -1438,9 +1388,9 @@ def savenifti(img, filename, *args):
         if isinstance(args[0], (defaultdict, dict)):
             header = args[0]
         elif args[0] in ("nifti1", "nifti2"):
-            header = nifticreate(img, args[0])
+            header = nifticreate(img, args[0], headeronly=True, **kwargs)
     else:
-        header = nifticreate(img)
+        header = nifticreate(img, headeronly=True, **kwargs)
 
     buf = b"".join(header[name].tobytes() for name in header)
 
