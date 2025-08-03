@@ -22,7 +22,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install numpy backports.lzma setuptools
+          pip install --force-reinstall --no-cache-dir --upgrade numpy backports.lzma setuptools h5py scipy bjdata
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
       - name: Build sdist
         run: |
@@ -31,10 +31,9 @@ jobs:
         run: |
           python -m unittest discover -v test
       - name: Codec benchmark
-        if: false
         run: |
           pip install bjdata lz4
-          pip install blosc2 --no-binary=blosc2
+          pip install --force-reinstall --no-cache-dir --upgrade blosc2
           cp -a test/benchcodecs.py .
           python -m benchcodecs
 
