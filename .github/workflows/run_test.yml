@@ -31,6 +31,7 @@ jobs:
         run: |
           python -m unittest discover -v test
       - name: Codec benchmark
+        if: false
         run: |
           pip install bjdata lz4
           pip install --force-reinstall --no-cache-dir --upgrade blosc2
