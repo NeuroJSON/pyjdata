@@ -284,10 +284,13 @@ class neurojgui:
     GUI class for NeuroJSON browser
     """
 
-    import tkinter as tk
-    from tkinter import messagebox
-
     def __init__(self):
+        import tkinter as tk
+        from tkinter import messagebox
+
+        self.tk = tk
+        self.messagebox = messagebox
+
         self.root = self.tk.Tk()
         self.root.title("NeuroJSON.io Dataset Browser")
         self.root.geometry("800x600")

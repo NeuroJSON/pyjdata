@@ -4,7 +4,7 @@
 
 - Copyright: (C) Qianqian Fang (2019-2025) <q.fang at neu.edu>
 - License: Apache License, Version 2.0
-- Version: 0.8.0
+- Version: 0.8.1
 - URL: https://github.com/NeuroJSON/pyjdata
 - Acknowledgement: This project is supported by US National Institute of Health (NIH)
   grant [U24-NS124027](https://reporter.nih.gov/project-details/10308329)

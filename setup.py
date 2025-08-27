@@ -6,7 +6,7 @@ with open("README.md", "r") as fh:
 setup(
     name="jdata",
     packages=["jdata"],
-    version="0.8.0",
+    version="0.8.1",
     license="Apache license 2.0",
     description="JSON/binary JSON formats for exchanging Python and Numpy data",
     long_description=readme,
