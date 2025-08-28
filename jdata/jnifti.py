@@ -84,9 +84,10 @@ def nii2jnii(filename, format="jnii", *varargin, **kwargs):
     dataendian = sys.byteorder
 
     if nii["hdr"]["sizeof_hdr"] not in [348, 540]:
-        nii["hdr"]["sizeof_hdr"] = struct.unpack(
-            ">I", struct.pack("<I", nii["hdr"]["sizeof_hdr"])
-        )[0]
+        value = nii["hdr"]["sizeof_hdr"]
+        if not isinstance(value, np.ndarray):
+            value = np.array(value)
+        nii["hdr"]["sizeof_hdr"] = value.byteswap()
 
     if nii["hdr"]["sizeof_hdr"] == 540:  # NIFTI-2 format
         niftiheader = niiformat("nifti2")
@@ -104,14 +105,15 @@ def nii2jnii(filename, format="jnii", *varargin, **kwargs):
     if nii["hdr"]["dim"][0] > 7:
         names = list(nii["hdr"].keys())
         for name in names:
-            nii["hdr"][name] = struct.unpack(
-                ">" + nii["hdr"][name][1:],
-                struct.pack("<" + nii["hdr"][name][1:], nii["hdr"][name]),
-            )[0]
+            value = nii["hdr"][name]
+            if not isinstance(value, np.ndarray):
+                value = np.array(value)
+
+            # Swap bytes and change dtype
+            nii["hdr"][name] = value.byteswap()
+
         if nii["hdr"]["sizeof_hdr"] > 540:
-            nii["hdr"]["sizeof_hdr"] = struct.unpack(
-                ">I", struct.pack("<I", nii["hdr"]["sizeof_hdr"])
-            )[0]
+            nii["hdr"]["sizeof_hdr"] = nii["hdr"]["sizeof_hdr"].byteswap()
 
     type2byte = np.array(
         [
