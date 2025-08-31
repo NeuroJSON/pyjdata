@@ -31,12 +31,15 @@ jobs:
         run: |
           python -m unittest discover -v test
       - name: Codec benchmark
-        if: false
         run: |
-          pip install bjdata lz4
-          pip install --force-reinstall --no-cache-dir --upgrade blosc2
-          cp -a test/benchcodecs.py .
+          pip install --upgrade bjdata lz4
+          cd benchmark
           python -m benchcodecs
+      - name: NIfTI file loading benchmark
+        run: |
+          pip install --upgrade nibabel
+          cd benchmark
+          python -m benchnifti
 
   deploy:
     runs-on: ubuntu-22.04
