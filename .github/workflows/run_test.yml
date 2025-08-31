@@ -32,7 +32,7 @@ jobs:
           python -m unittest discover -v test
       - name: Codec benchmark
         run: |
-          pip install --no-binary=blosc2 blosc2
+          pip install --upgrade --no-cache-dir blosc2
           cd benchmark
           python -m benchcodecs
       - name: NIfTI file loading benchmark
