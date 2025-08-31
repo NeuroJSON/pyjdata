@@ -31,7 +31,7 @@ jobs:
         run: |
           python -m unittest discover -v test
       - name: Codec benchmark
-        if: matrix.python-version == '3.9'
+        if: matrix.python-version != '3.7' || matrix.python-version != '3.8' || matrix.python-version == '3.9'
         run: |
           pip install "numpy<2.0" blosc2
           cd benchmark
