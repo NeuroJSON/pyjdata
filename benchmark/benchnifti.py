@@ -1,5 +1,6 @@
 import time
 import os
+import sys
 import glob
 import urllib.request
 import zipfile
@@ -8,6 +9,9 @@ import shutil
 
 import nibabel as nib
 import numpy as np
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 import jdata as jd
 
 tempdir = tempfile.mkdtemp()

@@ -1,10 +1,13 @@
 """
     Speed benchmark for saving/loading numpy arrays using various compression codecs
 """
-import jdata as jd
-import numpy as np
 import time
 import os
+import numpy as np
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+import jdata as jd
 
 print("jdata version:" + jd.__version__)
 
