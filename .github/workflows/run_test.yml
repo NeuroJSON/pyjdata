@@ -31,8 +31,15 @@ jobs:
         run: |
           python -m unittest discover -v test
       - name: Codec benchmark
+        if: matrix.python-version == '3.9'
         run: |
-          pip install --upgrade --no-cache-dir blosc2
+          pip install "numpy<2.0" blosc2
+          cd benchmark
+          python -m benchcodecs
+      - name: Codec benchmark
+        if: matrix.python-version != '3.9'
+        run: |
+          pip install blosc2
           cd benchmark
           python -m benchcodecs
       - name: NIfTI file loading benchmark
