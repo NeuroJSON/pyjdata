@@ -739,6 +739,7 @@ def loadmat(filename, **kwargs):
             else:
                 # Use F-order for flattening/reshaping
                 data[key] = np.array(value, order="F")
+    return data
 
 
 def loadjd(filename: str, suffix=None, **kwargs):
