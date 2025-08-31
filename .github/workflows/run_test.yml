@@ -32,7 +32,7 @@ jobs:
           python -m unittest discover -v test
       - name: Codec benchmark
         run: |
-          pip install --upgrade bjdata lz4
+          pip install --upgrade lz4 blosc2
           cd benchmark
           python -m benchcodecs
       - name: NIfTI file loading benchmark
