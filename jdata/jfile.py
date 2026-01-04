@@ -412,6 +412,7 @@ def saveb(data, fname, opt={}, **kwargs):
     """
     kwargs.setdefault("encode", True)
     kwargs.setdefault("inplace", True)
+    kwargs["base64"] = False
     kwargs.update(opt)
 
     try:

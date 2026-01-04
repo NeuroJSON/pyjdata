@@ -34,6 +34,8 @@ import zlib
 import base64
 import os
 import re
+from .jpath import jsonpath
+import lzma
 
 ##====================================================================================
 ## global variables
@@ -107,7 +109,7 @@ def encode(d, opt={}, **kwargs):
                     import lzma
                 except ImportError:
                     from backports import lzma
-            except Exception:
+            except ImportError:
                 raise Exception(
                     "JData",
                     'you must install "lzma" module to compress with this format',
@@ -298,38 +300,40 @@ def decode(d, opt={}, **kwargs):
                 elif d["_ArrayZipType_"] == "gzip":
                     newobj = zlib.decompress(bytes(newobj), zlib.MAX_WBITS | 32)
                 elif d["_ArrayZipType_"] == "lzma":
-                    try:
-                        import lzma
-                    except ImportError:
-                        from backports import lzma
                     buf = bytearray(newobj)  # set length to -1 (unknown) if EOF appears
                     buf[5:13] = b"\xff\xff\xff\xff\xff\xff\xff\xff"
                     newobj = lzma.decompress(buf, lzma.FORMAT_ALONE)
                 elif d["_ArrayZipType_"] == "lz4":
                     try:
                         import lz4.frame
-
-                        newobj = lz4.frame.decompress(bytes(newobj))
-                    except Exception:
+                    except ImportError:
                         print(
                             'Warning: you must install "lz4" module to decompress a data record in this file, ignoring'
                         )
                         return copy.deepcopy(d) if opt["inplace"] else d
+
+                    try:
+                        newobj = lz4.frame.decompress(bytes(newobj))
+                    except Exception as e:
+                        raise ValueError(f"lz4 decompression failed: {e}")
+
                 elif d["_ArrayZipType_"].startswith("blosc2"):
                     try:
                         import blosc2
+                    except ImportError:
+                        print('Warning: you must install "blosc2" module...')
+                        return copy.deepcopy(d) if opt["inplace"] else d
 
+                    try:
                         blosc2nthread = 1
                         if "nthread" in opt:
                             blosc2nthread = opt["nthread"]
                         newobj = blosc2.decompress2(
                             bytes(newobj), as_bytearray=False, nthreads=blosc2nthread
                         )
-                    except Exception:
-                        print(
-                            'Warning: you must install "blosc2" module to decompress a data record in this file, ignoring'
-                        )
-                        return copy.deepcopy(d) if opt["inplace"] else d
+                    except Exception as e:
+                        raise ValueError(f"blosc2 decompression failed: {e}")
+
                 newobj = np.frombuffer(
                     bytearray(newobj), dtype=np.dtype(d["_ArrayType_"])
                 ).reshape(d["_ArrayZipSize_"])
@@ -380,9 +384,9 @@ def decode(d, opt={}, **kwargs):
                     "one and only one of _ArrayData_ or _ArrayZipData_ is required",
                 )
         elif "_DataLink_" in d:
-            if opt["maxlinklevel"] > 0 and "_DataLink_" in data:
-                if isinstance(data["_DataLink_"], str):
-                    datalink = data["_DataLink_"]
+            if opt["maxlinklevel"] > 0 and "_DataLink_" in d:
+                if isinstance(d["_DataLink_"], str):
+                    datalink = d["_DataLink_"]
                     if re.search("\:\$", datalink):
                         ref = re.search(
                             "^(?P<proto>[a-zA-Z]+://)*(?P<path>.+)(?P<delim>\:)()*(?P<jsonpath>(?<=:)\$\d*\.*.*)*",
@@ -399,8 +403,8 @@ def decode(d, opt={}, **kwargs):
                         if os.path.exists(fname):
                             opt["maxlinklevel"] = opt["maxlinklevel"] - 1
                             if ref.group("jsonpath"):
-                                newobj = jsonpath(newdata, ref.group("jsonpath"))
-                        return nrewobj
+                                newobj = jsonpath(newobj, ref.group("jsonpath"))
+                        return newobj
                     else:
                         raise Exception(
                             "JData",
@@ -452,7 +456,8 @@ def encodedict(d0, opt={}):
 
 
 def encodelist(d0, opt={}):
-    d = copy.deepcopy(d0) if opt["inplace"] else d0
+    if opt["inplace"]:
+        d = [copy.deepcopy(x) if not isinstance(x, np.ndarray) else x for x in d0]
     for i, s in enumerate(d):
         d[i] = encode(s, opt)
     return d
@@ -475,7 +480,8 @@ def decodedict(d0, opt={}):
 
 
 def decodelist(d0, opt={}):
-    d = copy.deepcopy(d0) if opt["inplace"] else d0
+    if opt["inplace"]:
+        d = [copy.deepcopy(x) if not isinstance(x, np.ndarray) else x for x in d0]
     for i, s in enumerate(d):
         d[i] = decode(s, opt)
     return d
@@ -502,16 +508,6 @@ def gzipencode(buf):
 
 
 def lzmaencode(buf):
-    try:
-        try:
-            import lzma
-        except ImportError:
-            from backports import lzma
-    except Exception:
-        raise Exception(
-            "JData",
-            'you must install "lzma" module to compress with this format',
-        )
     return lzma.compress(buf, lzma.FORMAT_ALONE)
 
 
@@ -554,16 +550,6 @@ def gzipdecode(buf):
 
 
 def lzmadecode(buf):
-    try:
-        try:
-            import lzma
-        except ImportError:
-            from backports import lzma
-    except Exception:
-        raise Exception(
-            "JData",
-            'you must install "lzma" module to compress with this format',
-        )
     newbuf = bytearray(buf)  # set length to -1 (unknown) if EOF appears
     newbuf[5:13] = b"\xff\xff\xff\xff\xff\xff\xff\xff"
     return lzma.decompress(newbuf, lzma.FORMAT_ALONE)
