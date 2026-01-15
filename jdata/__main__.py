@@ -2,7 +2,7 @@
 
 Provides a routine for converting text-/binary-based JData files to Python data.
 
-Copyright (c) 2019-2025 Qianqian Fang <q.fang at neu.edu>
+Copyright (c) 2019-2026 Qianqian Fang <q.fang at neu.edu>
 
 Call
 

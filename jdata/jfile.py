@@ -1,7 +1,7 @@
 """@package docstring
 File IO to load/decode JData-based files to Python data or encode/save Python data to JData files
 
-Copyright (c) 2019-2025 Qianqian Fang <q.fang at neu.edu>
+Copyright (c) 2019-2026 Qianqian Fang <q.fang at neu.edu>
 """
 
 __all__ = [

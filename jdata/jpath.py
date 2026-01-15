@@ -1,7 +1,7 @@
 """@package docstring
 JSONPath implementation ported from the jsonpath MATLAB function in JSONLab
 
-Copyright (c) 2019-2025 Qianqian Fang <q.fang at neu.edu>
+Copyright (c) 2019-2026 Qianqian Fang <q.fang at neu.edu>
 """
 
 __all__ = [

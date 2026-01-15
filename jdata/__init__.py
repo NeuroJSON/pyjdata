@@ -32,7 +32,7 @@ into JData compatible dict-based objects
 The JData-encoded data object can then be decoded using ``decode``
 to restore the original data types
 
-Copyright (c) 2019-2025 Qianqian Fang <q.fang at neu.edu>
+Copyright (c) 2019-2026 Qianqian Fang <q.fang at neu.edu>
 """
 
 from .jfile import (
@@ -119,9 +119,11 @@ from .csv import (
     save_csv_tsv,
 )
 
+from .jdict import jdict
+from .jschema import jsonschema
 from .neurojson import neuroj, neurojgui
 
-__version__ = "0.8.3"
+__version__ = "0.9.0"
 __all__ = [
     "loadjson",
     "savejson",
@@ -196,6 +198,8 @@ __all__ = [
     "savemsgpack",
     "loadubjson",
     "saveubjson",
+    "jdict",
+    "jsonschema",
 ]
 
-__license__ = """Apache license 2.0, Copyright (c) 2019-2025 Qianqian Fang"""
+__license__ = """Apache license 2.0, Copyright (c) 2019-2026 Qianqian Fang"""

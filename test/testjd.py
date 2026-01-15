@@ -11,7 +11,7 @@ or
 
 in the root folder.
 
-Copyright (c) 2019-2025 Qianqian Fang <q.fang at neu.edu>
+Copyright (c) 2019-2026 Qianqian Fang <q.fang at neu.edu>
 """
 
 import unittest
