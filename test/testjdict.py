@@ -178,6 +178,325 @@ class TestJdictAttributes(unittest.TestCase):
         self.assertEqual(jd["{dims}"], ["x", "y", "z"])
 
 
+class TestJdictDims(unittest.TestCase):
+    """Test dimension-based indexing without coords"""
+
+    def test_root_level_dim_select(self):
+        jd = jdict(np.arange(12).reshape(3, 4))
+        jd.setattr("dims", ["x", "y"])
+        result = jd.x(1)()
+        np.testing.assert_array_equal(result, [4, 5, 6, 7])
+
+    def test_root_level_dim_select_second_dim(self):
+        jd = jdict(np.arange(12).reshape(3, 4))
+        jd.setattr("dims", ["x", "y"])
+        result = jd.y(2)()
+        np.testing.assert_array_equal(result, [2, 6, 10])  # NumPy drops singleton dim
+
+    def test_second_level_dim_select(self):
+        jd = jdict({"data": np.arange(12).reshape(3, 4)})
+        jd.data.setattr("dims", ["row", "col"])
+        result = jd.data.row(0)()
+        np.testing.assert_array_equal(result, [0, 1, 2, 3])
+
+    def test_third_level_dim_select(self):
+        jd = jdict({"level1": {"level2": {"arr": np.arange(6).reshape(2, 3)}}})
+        jd.level1.level2.arr.setattr("dims", ["i", "j"])
+        result = jd.level1.level2.arr.i(1)()
+        np.testing.assert_array_equal(result, [3, 4, 5])
+
+    def test_dim_slice_select(self):
+        jd = jdict(np.arange(12).reshape(3, 4))
+        jd.setattr("dims", ["x", "y"])
+        result = jd.x(slice(0, 2))()
+        np.testing.assert_array_equal(result, [[0, 1, 2, 3], [4, 5, 6, 7]])
+
+    def test_dim_list_select(self):
+        jd = jdict(np.arange(12).reshape(3, 4))
+        jd.setattr("dims", ["x", "y"])
+        result = jd.x([0, 2])()
+        np.testing.assert_array_equal(result, [[0, 1, 2, 3], [8, 9, 10, 11]])
+
+    def test_3d_dim_select(self):
+        jd = jdict(np.arange(24).reshape(2, 3, 4))
+        jd.setattr("dims", ["x", "y", "z"])
+        result = jd.y(1)()
+        expected = np.arange(24).reshape(2, 3, 4)[:, 1, :]  # scalar index drops dim
+        np.testing.assert_array_equal(result, expected)
+
+    def test_sibling_dims(self):
+        jd = jdict(
+            {"exp1": np.arange(6).reshape(2, 3), "exp2": np.arange(8).reshape(2, 4)}
+        )
+        jd.exp1.setattr("dims", ["t", "s"])
+        jd.exp2.setattr("dims", ["x", "y"])
+        result1 = jd.exp1.t(1)()
+        result2 = jd.exp2.x(0)()
+        np.testing.assert_array_equal(result1, [3, 4, 5])
+        np.testing.assert_array_equal(result2, [0, 1, 2, 3])
+
+
+class TestJdictCoords(unittest.TestCase):
+    """Test coordinate-based indexing"""
+
+    def test_string_coord_single_select(self):
+        jd = jdict(np.arange(12).reshape(3, 4))
+        jd.setattr("dims", ["x", "y"])
+        jd.setattr("coords", {"x": ["a", "b", "c"], "y": ["p", "q", "r", "s"]})
+        result = jd.x("b")()
+        np.testing.assert_array_equal(result, [4, 5, 6, 7])
+
+    def test_string_coord_single_select_second_dim(self):
+        jd = jdict(np.arange(12).reshape(3, 4))
+        jd.setattr("dims", ["x", "y"])
+        jd.setattr("coords", {"x": ["a", "b", "c"], "y": ["p", "q", "r", "s"]})
+        result = jd.y("r")()
+        np.testing.assert_array_equal(result, [2, 6, 10])  # NumPy drops singleton dim
+
+    def test_numeric_coord_single_select(self):
+        jd = jdict(np.arange(12).reshape(3, 4))
+        jd.setattr("dims", ["x", "y"])
+        jd.setattr("coords", {"x": [10, 20, 30], "y": [100, 200, 300, 400]})
+        result = jd.x(20)()
+        np.testing.assert_array_equal(result, [4, 5, 6, 7])
+
+    def test_numeric_coord_single_select_second_dim(self):
+        jd = jdict(np.arange(12).reshape(3, 4))
+        jd.setattr("dims", ["x", "y"])
+        jd.setattr("coords", {"x": [10, 20, 30], "y": [100, 200, 300, 400]})
+        result = jd.y(300)()
+        np.testing.assert_array_equal(result, [2, 6, 10])  # NumPy drops singleton dim
+
+    def test_string_coord_multi_select(self):
+        jd = jdict(np.arange(12).reshape(3, 4))
+        jd.setattr("dims", ["x", "y"])
+        jd.setattr("coords", {"x": ["a", "b", "c"], "y": ["p", "q", "r", "s"]})
+        result = jd.x(["a", "c"])()
+        np.testing.assert_array_equal(result, [[0, 1, 2, 3], [8, 9, 10, 11]])
+
+    def test_numeric_coord_multi_select(self):
+        jd = jdict(np.arange(12).reshape(3, 4))
+        jd.setattr("dims", ["x", "y"])
+        jd.setattr("coords", {"x": [10, 20, 30], "y": [100, 200, 300, 400]})
+        result = jd.x([10, 30])()
+        np.testing.assert_array_equal(result, [[0, 1, 2, 3], [8, 9, 10, 11]])
+
+    def test_string_coord_slice(self):
+        jd = jdict(np.arange(12).reshape(3, 4))
+        jd.setattr("dims", ["x", "y"])
+        jd.setattr("coords", {"x": ["a", "b", "c"], "y": ["p", "q", "r", "s"]})
+        result = jd.x({"start": "a", "stop": "b"})()
+        np.testing.assert_array_equal(result, [[0, 1, 2, 3], [4, 5, 6, 7]])
+
+    def test_direct_index_with_string_coords(self):
+        jd = jdict(np.arange(12).reshape(3, 4))
+        jd.setattr("dims", ["x", "y"])
+        jd.setattr("coords", {"x": ["a", "b", "c"], "y": ["p", "q", "r", "s"]})
+        result = jd.x(1)()  # direct index, not coord lookup
+        np.testing.assert_array_equal(result, [4, 5, 6, 7])
+
+    def test_dims_without_coords(self):
+        jd = jdict(np.arange(12).reshape(3, 4))
+        jd.setattr("dims", ["x", "y"])
+        result = jd.x(1)()
+        np.testing.assert_array_equal(result, [4, 5, 6, 7])
+
+    def test_second_level_coords(self):
+        jd = jdict({"data": np.arange(12).reshape(3, 4)})
+        jd.data.setattr("dims", ["row", "col"])
+        jd.data.setattr("coords", {"row": ["r1", "r2", "r3"], "col": [1, 2, 3, 4]})
+        result_str = jd.data.row("r2")()
+        result_num = jd.data.col(3)()
+        np.testing.assert_array_equal(result_str, [4, 5, 6, 7])
+        np.testing.assert_array_equal(
+            result_num, [2, 6, 10]
+        )  # NumPy drops singleton dim
+
+    def test_third_level_coords(self):
+        jd = jdict({"level1": {"level2": {"arr": np.arange(6).reshape(2, 3)}}})
+        jd.level1.level2.arr.setattr("dims", ["i", "j"])
+        jd.level1.level2.arr.setattr("coords", {"i": ["x", "y"], "j": ["a", "b", "c"]})
+        result_i = jd.level1.level2.arr.i("y")()
+        result_j = jd.level1.level2.arr.j("b")()
+        np.testing.assert_array_equal(result_i, [3, 4, 5])
+        np.testing.assert_array_equal(result_j, [1, 4])  # NumPy drops singleton dim
+
+    def test_sibling_coords(self):
+        jd = jdict(
+            {"exp1": np.arange(6).reshape(2, 3), "exp2": np.arange(8).reshape(2, 4)}
+        )
+        jd.exp1.setattr("dims", ["t", "s"])
+        jd.exp1.setattr("coords", {"t": ["t1", "t2"], "s": ["s1", "s2", "s3"]})
+        jd.exp2.setattr("dims", ["x", "y"])
+        jd.exp2.setattr("coords", {"x": [0, 1], "y": [10, 20, 30, 40]})
+        result1 = jd.exp1.t("t2")()
+        result2 = jd.exp2.y(30)()
+        np.testing.assert_array_equal(result1, [3, 4, 5])
+        np.testing.assert_array_equal(result2, [2, 6])  # NumPy drops singleton dim
+
+    def test_3d_coords(self):
+        jd = jdict(np.arange(24).reshape(2, 3, 4))
+        jd.setattr("dims", ["x", "y", "z"])
+        jd.setattr(
+            "coords", {"x": ["a", "b"], "y": [10, 20, 30], "z": ["p", "q", "r", "s"]}
+        )
+        result_x = jd.x("b")()
+        result_y = jd.y(20)()
+        result_z = jd.z("r")()
+        expected_x = np.arange(24).reshape(2, 3, 4)[1, :, :]  # scalar drops dim
+        expected_y = np.arange(24).reshape(2, 3, 4)[:, 1, :]
+        expected_z = np.arange(24).reshape(2, 3, 4)[:, :, 2]
+        np.testing.assert_array_equal(result_x, expected_x)
+        np.testing.assert_array_equal(result_y, expected_y)
+        np.testing.assert_array_equal(result_z, expected_z)
+
+    def test_getattr_returns_coords(self):
+        jd = jdict(np.arange(12).reshape(3, 4))
+        jd.setattr("dims", ["x", "y"])
+        jd.setattr("coords", {"x": ["a", "b", "c"], "y": [1, 2, 3, 4]})
+        coords = jd.getattr("coords")
+        self.assertEqual(coords, {"x": ["a", "b", "c"], "y": [1, 2, 3, 4]})
+
+    def test_coord_not_found_raises(self):
+        jd = jdict(np.arange(12).reshape(3, 4))
+        jd.setattr("dims", ["x", "y"])
+        jd.setattr("coords", {"x": ["a", "b", "c"], "y": ["p", "q", "r", "s"]})
+        with self.assertRaises(ValueError):
+            jd.x("z")()
+
+
+class TestJdictCoordsCascade(unittest.TestCase):
+    """Test cascaded coordinate selections - requires updated _DimAccessor that tracks reduced dims"""
+
+    def test_cascade_two_singles(self):
+        jd = jdict(np.arange(12).reshape(3, 4))
+        jd.setattr("dims", ["x", "y"])
+        jd.setattr("coords", {"x": ["a", "b", "c"], "y": ["p", "q", "r", "s"]})
+        # After jd.x("b"), result is 1D array [4,5,6,7], dims should be ["y"]
+        result = jd.x("b").y("r")()
+        self.assertEqual(result, 6)
+
+    def test_cascade_reverse_order(self):
+        jd = jdict(np.arange(12).reshape(3, 4))
+        jd.setattr("dims", ["x", "y"])
+        jd.setattr("coords", {"x": ["a", "b", "c"], "y": ["p", "q", "r", "s"]})
+        result = jd.y("q").x("c")()
+        self.assertEqual(result, 9)
+
+    def test_cascade_multi_then_single(self):
+        jd = jdict(np.arange(12).reshape(3, 4))
+        jd.setattr("dims", ["x", "y"])
+        jd.setattr("coords", {"x": ["a", "b", "c"], "y": ["p", "q", "r", "s"]})
+        result = jd.x(["a", "c"]).y("s")()
+        np.testing.assert_array_equal(result, [3, 11])  # NumPy drops singleton dim
+
+    def test_cascade_single_then_multi(self):
+        jd = jdict(np.arange(12).reshape(3, 4))
+        jd.setattr("dims", ["x", "y"])
+        jd.setattr("coords", {"x": ["a", "b", "c"], "y": ["p", "q", "r", "s"]})
+        result = jd.y("p").x(["a", "b"])()
+        np.testing.assert_array_equal(result, [0, 4])
+
+    def test_cascade_numeric_coords(self):
+        jd = jdict(np.arange(12).reshape(3, 4))
+        jd.setattr("dims", ["x", "y"])
+        jd.setattr("coords", {"x": [10, 20, 30], "y": [100, 200, 300, 400]})
+        result = jd.x(20).y(300)()
+        self.assertEqual(result, 6)
+
+    def test_cascade_numeric_multi_then_single(self):
+        jd = jdict(np.arange(12).reshape(3, 4))
+        jd.setattr("dims", ["x", "y"])
+        jd.setattr("coords", {"x": [10, 20, 30], "y": [100, 200, 300, 400]})
+        result = jd.x([10, 30]).y(400)()
+        np.testing.assert_array_equal(result, [3, 11])
+
+    def test_cascade_in_nested_struct(self):
+        jd = jdict({"data": np.arange(12).reshape(3, 4)})
+        jd.data.setattr("dims", ["row", "col"])
+        jd.data.setattr(
+            "coords", {"row": ["r1", "r2", "r3"], "col": ["c1", "c2", "c3", "c4"]}
+        )
+        result = jd.data.row("r2").col("c3")()
+        self.assertEqual(result, 6)
+
+    def test_cascade_3d_two_dims(self):
+        jd = jdict(np.arange(24).reshape(2, 3, 4))
+        jd.setattr("dims", ["x", "y", "z"])
+        jd.setattr(
+            "coords", {"x": ["a", "b"], "y": ["p", "q", "r"], "z": ["i", "j", "k", "l"]}
+        )
+        result = jd.x("b").z("k")()
+        np.testing.assert_array_equal(result, [14, 18, 22])
+
+    def test_cascade_3d_all_three_dims(self):
+        jd = jdict(np.arange(24).reshape(2, 3, 4))
+        jd.setattr("dims", ["x", "y", "z"])
+        jd.setattr(
+            "coords", {"x": ["a", "b"], "y": ["p", "q", "r"], "z": ["i", "j", "k", "l"]}
+        )
+        result = jd.x("a").y("q").z("j")()
+        self.assertEqual(result, 5)
+
+
+class TestJdictDeepNesting(unittest.TestCase):
+    """Test dims/coords at deeply nested levels"""
+
+    def test_four_levels_deep_dims(self):
+        jd = jdict({"a": {"b": {"c": {"d": np.arange(6).reshape(2, 3)}}}})
+        jd.a.b.c.d.setattr("dims", ["x", "y"])
+        result = jd.a.b.c.d.x(1)()
+        np.testing.assert_array_equal(result, [3, 4, 5])
+
+    def test_four_levels_deep_coords(self):
+        jd = jdict({"a": {"b": {"c": {"d": np.arange(6).reshape(2, 3)}}}})
+        jd.a.b.c.d.setattr("dims", ["x", "y"])
+        jd.a.b.c.d.setattr("coords", {"x": ["r1", "r2"], "y": ["c1", "c2", "c3"]})
+        result = jd.a.b.c.d.x("r2").y("c2")()
+        self.assertEqual(result, 4)
+
+    def test_multiple_arrays_deep(self):
+        jd = jdict(
+            {
+                "experiment": {
+                    "trial1": {"data": np.arange(12).reshape(3, 4)},
+                    "trial2": {"data": np.arange(8).reshape(2, 4)},
+                }
+            }
+        )
+        jd.experiment.trial1.data.setattr("dims", ["time", "channel"])
+        jd.experiment.trial1.data.setattr(
+            "coords",
+            {"time": ["t1", "t2", "t3"], "channel": ["ch1", "ch2", "ch3", "ch4"]},
+        )
+        jd.experiment.trial2.data.setattr("dims", ["time", "channel"])
+        jd.experiment.trial2.data.setattr(
+            "coords", {"time": ["t1", "t2"], "channel": ["ch1", "ch2", "ch3", "ch4"]}
+        )
+
+        result1 = jd.experiment.trial1.data.time("t2").channel("ch3")()
+        result2 = jd.experiment.trial2.data.time("t1").channel("ch4")()
+        self.assertEqual(result1, 6)
+        self.assertEqual(result2, 3)
+
+    def test_mixed_depth_attrs(self):
+        jd = jdict(
+            {
+                "shallow": np.arange(4).reshape(2, 2),
+                "deep": {"nested": {"arr": np.arange(6).reshape(2, 3)}},
+            }
+        )
+        jd.shallow.setattr("dims", ["a", "b"])
+        jd.shallow.setattr("coords", {"a": ["x", "y"], "b": ["p", "q"]})
+        jd.deep.nested.arr.setattr("dims", ["i", "j"])
+        jd.deep.nested.arr.setattr("coords", {"i": [0, 1], "j": [10, 20, 30]})
+
+        result_shallow = jd.shallow.a("y").b("p")()
+        result_deep = jd.deep.nested.arr.i(1).j(20)()
+        self.assertEqual(result_shallow, 2)
+        self.assertEqual(result_deep, 4)
+
+
 class TestJsonSchema(unittest.TestCase):
     def test_setschema_from_dict(self):
         jd = jdict({"name": "John", "age": 30})

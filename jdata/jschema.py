@@ -24,6 +24,23 @@ import math
 import numpy as np
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+_BINTYPES = {
+    "uint8": np.uint8,
+    "int8": np.int8,
+    "uint16": np.uint16,
+    "int16": np.int16,
+    "uint32": np.uint32,
+    "int32": np.int32,
+    "uint64": np.uint64,
+    "int64": np.int64,
+    "float32": np.float32,
+    "single": np.float32,
+    "float64": np.float64,
+    "double": np.float64,
+    "bool": np.bool_,
+    "logical": np.bool_,
+}
+
 
 def jsonschema(
     data: Any, schema: Any = None, **kwargs
@@ -142,7 +159,7 @@ def _validatedata(
             errors.extend(errmsg)
 
     # numpy array validation
-    if isinstance(data, np.ndarray):
+    if isinstance(data, np.ndarray) or "binType" in schema:
         isvalid, errmsg = _validatebinary(data, schema, path)
         if not isvalid:
             valid = False
@@ -327,92 +344,48 @@ def _validatenumeric(
 
 
 def _validatebinary(data, schema: dict, path: str) -> Tuple[bool, List[str]]:
-    valid = True
-    errors = []
+    """Validate binary/array data against binType and dims."""
+    valid, errors = True, []
 
     if "binType" in schema:
-        bintype = schema["binType"]
-        typemap = {
-            "uint8": np.uint8,
-            "int8": np.int8,
-            "uint16": np.uint16,
-            "int16": np.int16,
-            "uint32": np.uint32,
-            "int32": np.int32,
-            "uint64": np.uint64,
-            "int64": np.int64,
-            "float32": np.float32,
-            "single": np.float32,
-            "float64": np.float64,
-            "double": np.float64,
-            "bool": np.bool_,
-            "logical": np.bool_,
-        }
-        if bintype not in typemap:
-            valid = False
-            errors.append(f'{path}: invalid binType "{bintype}"')
-        elif data.dtype != typemap[bintype]:
-            valid = False
-            errors.append(f"{path}: expected {bintype}, got {data.dtype}")
+        dtype = _BINTYPES.get(schema["binType"])
+        if dtype is None:
+            return False, [f'{path}: invalid binType "{schema["binType"]}"']
+        if not isinstance(data, np.ndarray):
+            return False, [f"{path}: expected numpy array, got {type(data).__name__}"]
+        if data.dtype != dtype:
+            return False, [f"{path}: expected {schema['binType']}, got {data.dtype}"]
 
-    actualsize = list(data.shape)
+    if not isinstance(data, np.ndarray):
+        return valid, errors
 
-    for dimtype in ["minDims", "maxDims"]:
-        if dimtype in schema:
-            dims = schema[dimtype]
-            if isinstance(dims, (int, float)):
-                dims = [int(dims)]
-            elif isinstance(dims, (list, tuple)):
-                dims = [int(d) for d in dims]
+    # Validate minDims/maxDims
+    for dimtype in ("minDims", "maxDims"):
+        if dimtype not in schema:
+            continue
+        dims = schema[dimtype]
+        dims = [int(dims)] if isinstance(dims, (int, float)) else [int(d) for d in dims]
+        ismin = dimtype == "minDims"
 
-            ismin = dimtype == "minDims"
-
-            if len(dims) == 1:
-                # Vector check
-                isvector = data.ndim == 1 or (data.ndim == 2 and 1 in data.shape)
-                if not isvector and data.ndim > 1:
-                    errors.append(f"{path}: expected 1D array for {dimtype}")
-                    valid = False
-                else:
-                    actual_len = max(data.shape) if data.ndim > 0 else 0
-                    if ismin and actual_len < dims[0]:
-                        valid = False
-                        errors.append(
-                            f"{path}: length {actual_len} < {dimtype} {dims[0]}"
-                        )
-                    elif not ismin and actual_len > dims[0]:
-                        valid = False
-                        errors.append(
-                            f"{path}: length {actual_len} > {dimtype} {dims[0]}"
-                        )
-            else:
-                if ismin:
-                    actualsize_ext = actualsize + [1] * max(
-                        0, len(dims) - len(actualsize)
-                    )
-                    checklen = len(dims)
-                else:
-                    actualsize_ext = actualsize
-                    checklen = min(len(actualsize), len(dims))
-
-                for i in range(checklen):
-                    if ismin and actualsize_ext[i] < dims[i]:
-                        valid = False
-                        errors.append(
-                            f"{path}: dim {i} is {actualsize_ext[i]}, violates {dimtype} {dims[i]}"
-                        )
-                    elif not ismin and i < len(actualsize) and actualsize[i] > dims[i]:
-                        valid = False
-                        errors.append(
-                            f"{path}: dim {i} is {actualsize[i]}, violates {dimtype} {dims[i]}"
-                        )
-
-                if not ismin and len(actualsize) > len(dims):
-                    if any(s > 1 for s in actualsize[len(dims) :]):
-                        valid = False
-                        errors.append(
-                            f"{path}: has {len(actualsize)} dimensions, {dimtype} only specifies {len(dims)}"
-                        )
+        if len(dims) == 1:  # Vector check
+            actual = (
+                max(data.shape)
+                if data.ndim <= 2 and (data.ndim == 1 or 1 in data.shape)
+                else -1
+            )
+            if actual < 0:
+                valid, errors = False, errors + [f"{path}: expected 1D array"]
+            elif (ismin and actual < dims[0]) or (not ismin and actual > dims[0]):
+                valid, errors = False, errors + [
+                    f"{path}: length {actual} violates {dimtype} {dims[0]}"
+                ]
+        else:  # ND check
+            for i, d in enumerate(dims):
+                actual = data.shape[i] if i < data.ndim else 1
+                if (ismin and actual < d) or (not ismin and actual > d):
+                    valid, errors = False, errors + [
+                        f"{path}: dim {i} is {actual}, violates {dimtype} {d}"
+                    ]
 
     return valid, errors
 
@@ -643,30 +616,13 @@ def _generatedata(schema: dict, opts: dict) -> Any:
             schematype = "array"
 
     if "binType" in schema:
-        bintype = schema["binType"]
+        dtype = _BINTYPES.get(schema["binType"], np.float64)
         dims = schema.get("minDims", 1)
-        if isinstance(dims, (int, float)):
-            dims = (int(dims),)
-        elif isinstance(dims, list):
-            dims = tuple(int(d) for d in dims)
-
-        typemap = {
-            "uint8": np.uint8,
-            "int8": np.int8,
-            "uint16": np.uint16,
-            "int16": np.int16,
-            "uint32": np.uint32,
-            "int32": np.int32,
-            "uint64": np.uint64,
-            "int64": np.int64,
-            "float32": np.float32,
-            "single": np.float32,
-            "float64": np.float64,
-            "double": np.float64,
-            "bool": np.bool_,
-            "logical": np.bool_,
-        }
-        dtype = typemap.get(bintype, np.float64)
+        dims = (
+            (int(dims),)
+            if isinstance(dims, (int, float))
+            else tuple(int(d) for d in dims)
+        )
         return np.zeros(dims, dtype=dtype)
 
     if schematype == "null":
@@ -873,3 +829,16 @@ def _getsubschema(schema: dict, jsonpath: str) -> Optional[dict]:
                 return None
 
     return subschema
+
+
+def coerce(data: Any, schema: dict) -> Any:
+    """Coerce data to match schema's binType. For use before assignment."""
+    if not isinstance(schema, dict) or "binType" not in schema:
+        return data
+    dtype = _BINTYPES.get(schema["binType"])
+    if dtype is None or (isinstance(data, np.ndarray) and data.dtype == dtype):
+        return data
+    try:
+        return np.asarray(data, dtype=dtype)
+    except (ValueError, TypeError):
+        return data

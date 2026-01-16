@@ -149,7 +149,7 @@ class jdict:
         # Check for dimension-based indexing
         dims = _get_attr_value(attr, currentpath, "dims")
         if dims is not None and isinstance(dims, (list, tuple)) and name in dims:
-            return _DimAccessor(self, name, dims.index(name))
+            return _DimAccessor(self, name)
 
         if data is None:
             val = None
@@ -583,42 +583,107 @@ class jdict:
 
 
 class _DimAccessor:
-    """Helper class for dimension-based indexing like jd.data.x(1:10)"""
+    """Helper class for dimension-based indexing like jd.data.x('label')"""
 
-    def __init__(self, parent, dimname, dimpos):
+    __slots__ = ("_parent", "_dimname")
+
+    def __init__(self, parent, dimname):
         self._parent = parent
         self._dimname = dimname
-        self._dimpos = dimpos
 
-    def __call__(self, indices):
-        data = self._parent._data
-        attr = self._parent._attr
-        schema = self._parent._schema
-        currentpath = self._parent._currentpath
-        root = self._parent._root
-        dims = _get_attr_value(attr, currentpath, "dims")
+    def __call__(self, sel):
+        p = self._parent
+        dims = _get_attr_value(p._attr, p._currentpath, "dims")
+        data = p._data
+        if not isinstance(data, np.ndarray) or not dims:
+            return None
 
-        if isinstance(data, np.ndarray):
-            nddata = len(dims) if dims else data.ndim
-            idx = [slice(None)] * nddata
-            idx[self._dimpos] = indices
-            result = data[tuple(idx)]
+        # Get current position of this dim
+        dimpos = dims.index(self._dimname)
 
-            newobj = jdict.__new__(jdict)
-            object.__setattr__(newobj, "_data", result)
-            object.__setattr__(newobj, "_attr", attr)
-            object.__setattr__(newobj, "_schema", schema)
-            object.__setattr__(newobj, "_currentpath", currentpath)
-            object.__setattr__(newobj, "_root", root)
-            object.__setattr__(newobj, "_flags", {})
-            return newobj
-        return None
+        # Build index tuple
+        idx = [slice(None)] * data.ndim
+        coords = _get_attr_value(p._attr, p._currentpath, "coords")
+        idx[dimpos] = (
+            _coordlookup(coords.get(self._dimname), sel, self._dimname)
+            if coords
+            else sel
+        )
+
+        # Slice and build new jdict
+        result = data[tuple(idx)]
+        is_scalar = isinstance(idx[dimpos], (int, np.integer))
+
+        # Update dims/coords for cascade (remove dim if scalar selection)
+        new_attr = {"$": {}}
+        new_attr["$"]["dims"] = [
+            d for d in dims if not (is_scalar and d == self._dimname)
+        ]
+        if coords:
+            new_attr["$"]["coords"] = {
+                k: v
+                for k, v in coords.items()
+                if not (is_scalar and k == self._dimname)
+            }
+
+        newobj = jdict.__new__(jdict)
+        for attr, val in [
+            ("_data", result),
+            ("_attr", new_attr),
+            ("_schema", p._schema),
+            ("_currentpath", "$"),
+            ("_root", None),
+            ("_flags", {}),
+        ]:
+            object.__setattr__(newobj, attr, val)
+        object.__setattr__(newobj, "_root", newobj)
+        return newobj
 
 
 def _get_attr_value(attr, path, name):
     if path in attr and name in attr[path]:
         return attr[path][name]
     return None
+
+
+def _coordlookup(coords, sel, dimname):
+    """Convert coordinate labels to indices."""
+    if coords is None:
+        return sel
+
+    coords_arr = np.asarray(coords)
+    is_numeric_coords = np.issubdtype(coords_arr.dtype, np.number)
+
+    # Numeric value(s) on numeric coords -> lookup
+    if is_numeric_coords and isinstance(
+        sel, (int, float, np.number, list, tuple, np.ndarray)
+    ):
+        if isinstance(sel, (int, float, np.number)):
+            idx = np.where(coords_arr == sel)[0]
+            if len(idx) == 0:
+                raise ValueError(f'Coord {sel} not found in "{dimname}"')
+            return int(idx[0])
+        elif all(isinstance(s, (int, float, np.number)) for s in sel):
+            return [int(np.where(coords_arr == s)[0][0]) for s in sel]
+
+    # Int on non-numeric coords -> direct index
+    if isinstance(sel, (int, np.integer)) and not is_numeric_coords:
+        return sel
+
+    # Slice dict -> slice object
+    if isinstance(sel, dict) and "start" in sel:
+        coords_list = coords_arr.tolist()
+        start = coords_list.index(sel["start"]) if sel.get("start") else 0
+        stop = (
+            coords_list.index(sel["stop"]) + 1 if sel.get("stop") else len(coords_list)
+        )
+        return slice(start, stop)
+
+    # String or list of strings -> index lookup
+    coords_list = coords_arr.tolist()
+    if isinstance(sel, (list, tuple)):
+        return [coords_list.index(s) for s in sel]
+    return coords_list.index(sel)
 
 
 def _esckey(key):
