@@ -123,7 +123,7 @@ from .jdict import jdict
 from .jschema import jsonschema
 from .neurojson import neuroj, neurojgui
 
-__version__ = "0.9.1"
+__version__ = "0.9.2"
 __all__ = [
     "loadjson",
     "savejson",

@@ -293,6 +293,15 @@ class jdict:
         if schema:
             subschema = jsonschema(schema, None, getsubschema=currentpath)
             if subschema:
+                # Auto-cast if binType is defined
+                if isinstance(subschema, dict) and "binType" in subschema:
+                    bintype = subschema["binType"]
+                    if not isinstance(value, np.ndarray) or value.dtype.name != bintype:
+                        try:
+                            value = np.asarray(value, dtype=bintype)
+                        except (ValueError, TypeError):
+                            pass
+
                 valid, errs = jsonschema(value, subschema, rootschema=schema)
                 if not valid:
                     raise ValueError(
