@@ -117,11 +117,18 @@ from .csv import (
     loadcsv,
     loadtsv,
     save_csv_tsv,
+    encode_enum_column,
+    decode_enum_column,
+    is_enum_encoded,
+    tsv2json,
+    json2tsv,
+    save_csv_tsv_with_enum,
 )
 
 from .jdict import jdict
 from .jschema import jsonschema
 from .neurojson import neuroj, neurojgui
+from .njprep import dataset2json, NJPREP_DEFAULT
 
 __version__ = "0.9.2"
 __all__ = [
@@ -200,6 +207,14 @@ __all__ = [
     "saveubjson",
     "jdict",
     "jsonschema",
+    "dataset2json",
+    "NJPREP_DEFAULT",
+    "encode_enum_column",
+    "decode_enum_column",
+    "is_enum_encoded",
+    "tsv2json",
+    "json2tsv",
+    "save_csv_tsv_with_enum",
 ]
 
 __license__ = """Apache license 2.0, Copyright (c) 2019-2026 Qianqian Fang"""

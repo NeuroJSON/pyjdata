@@ -7,14 +7,23 @@ This unit is under the public domain
 
 import csv
 import gzip
+import zlib
+import base64
 from typing import Dict, List, Any, Optional, Union
 import numpy as np
+from collections import OrderedDict
 
 __all__ = [
     "load_csv_tsv",
     "loadcsv",
     "loadtsv",
     "save_csv_tsv",
+    "encode_enum_column",
+    "decode_enum_column",
+    "is_enum_encoded",
+    "tsv2json",
+    "json2tsv",
+    "save_csv_tsv_with_enum",
 ]
 
 ##====================================================================================
@@ -329,3 +338,349 @@ def save_csv_tsv(
 
     finally:
         file_handle.close()
+
+
+def encode_enum_column(values: List[Any], compress: bool = True) -> Union[List, Dict]:
+    """
+    Encode a column with repetitive values using _EnumKey_/_EnumValue_ JData construct.
+
+    If the number of unique values is small relative to total values, encodes as:
+    {
+        "_EnumKey_": [unique_value1, unique_value2, ...],
+        "_EnumValue_": {
+            "_ArraySize_": n,
+            "_ArrayType_": "uint8"|"uint16"|"uint32",
+            "_ArrayZipType_": "zlib",
+            "_ArrayZipSize_": n,
+            "_ArrayZipData_": base64_encoded_compressed_indices
+        }
+    }
+
+    Args:
+        values: List of column values
+        compress: If True, apply zlib compression
+
+    Returns:
+        Original list if encoding not beneficial, or dict with _EnumKey_/_EnumValue_
+    """
+    if not values:
+        return values
+
+    # Build enum mapping (preserving order of first occurrence)
+    enum_map = OrderedDict()
+    indices = []
+
+    for val in values:
+        if val not in enum_map:
+            enum_map[val] = len(enum_map) + 1  # 1-based indexing like Perl version
+        indices.append(enum_map[val])
+
+    num_unique = len(enum_map)
+    num_values = len(values)
+
+    # Only encode if beneficial (more values than 2x unique keys)
+    if num_values <= 2 * num_unique:
+        return values
+
+    # Determine array type based on number of unique values
+    if num_unique < 256:
+        dtype = np.uint8
+        dtype_name = "uint8"
+    elif num_unique < 65536:
+        dtype = np.uint16
+        dtype_name = "uint16"
+    else:
+        dtype = np.uint32
+        dtype_name = "uint32"
+
+    # Convert indices to numpy array and get bytes
+    indices_array = np.array(indices, dtype=dtype)
+    indices_bytes = indices_array.tobytes()
+
+    if compress:
+        compressed = zlib.compress(indices_bytes)
+        enum_value = OrderedDict(
+            [
+                ("_ArraySize_", num_values),
+                ("_ArrayType_", dtype_name),
+                ("_ArrayZipType_", "zlib"),
+                ("_ArrayZipSize_", num_values),
+                ("_ArrayZipData_", base64.b64encode(compressed).decode("ascii")),
+            ]
+        )
+    else:
+        enum_value = OrderedDict(
+            [
+                ("_ArraySize_", num_values),
+                ("_ArrayType_", dtype_name),
+                ("_ArrayData_", base64.b64encode(indices_bytes).decode("ascii")),
+            ]
+        )
+
+    return OrderedDict(
+        [("_EnumKey_", list(enum_map.keys())), ("_EnumValue_", enum_value)]
+    )
+
+
+def decode_enum_column(data: Dict) -> List[Any]:
+    """
+    Decode a column encoded with _EnumKey_/_EnumValue_ JData construct.
+
+    Args:
+        data: Dict with _EnumKey_ and _EnumValue_ keys
+
+    Returns:
+        List of decoded values
+    """
+    if not isinstance(data, dict):
+        return data
+
+    if "_EnumKey_" not in data or "_EnumValue_" not in data:
+        return data
+
+    enum_keys = data["_EnumKey_"]
+    enum_value = data["_EnumValue_"]
+
+    # Get array metadata
+    array_size = enum_value.get("_ArraySize_", 0)
+    array_type = enum_value.get("_ArrayType_", "uint8")
+
+    # Map type names to numpy dtypes
+    dtype_map = {
+        "uint8": np.uint8,
+        "uint16": np.uint16,
+        "uint32": np.uint32,
+        "int8": np.int8,
+        "int16": np.int16,
+        "int32": np.int32,
+    }
+    dtype = dtype_map.get(array_type, np.uint8)
+
+    # Decode the indices
+    if "_ArrayZipData_" in enum_value:
+        # Compressed data
+        compressed = base64.b64decode(enum_value["_ArrayZipData_"])
+        zip_type = enum_value.get("_ArrayZipType_", "zlib")
+        if zip_type == "zlib":
+            decompressed = zlib.decompress(compressed)
+        else:
+            raise ValueError(f"Unsupported compression type: {zip_type}")
+        indices = np.frombuffer(decompressed, dtype=dtype)
+    elif "_ArrayData_" in enum_value:
+        # Uncompressed base64 data
+        raw_bytes = base64.b64decode(enum_value["_ArrayData_"])
+        indices = np.frombuffer(raw_bytes, dtype=dtype)
+    else:
+        raise ValueError("_EnumValue_ must contain _ArrayZipData_ or _ArrayData_")
+
+    # Map indices back to values (indices are 1-based)
+    result = [
+        enum_keys[idx - 1] if 0 < idx <= len(enum_keys) else None for idx in indices
+    ]
+
+    return result
+
+
+def is_enum_encoded(data: Any) -> bool:
+    """Check if data is encoded with _EnumKey_/_EnumValue_ construct."""
+    return isinstance(data, dict) and "_EnumKey_" in data and "_EnumValue_" in data
+
+
+def tsv2json(
+    filepath_or_data: Union[str, List[List]],
+    compress: bool = False,
+    skip_columns: List[str] = None,
+    is_participants: bool = False,
+) -> Dict[str, Any]:
+    """
+    Convert TSV/CSV file or data to JSON with optional enum encoding.
+
+    Args:
+        filepath_or_data: File path or list of rows (first row is header)
+        compress: If True, use _EnumKey_/_EnumValue_ encoding for repetitive columns
+        skip_columns: Column names to skip enum encoding (always keep raw)
+        is_participants: If True, skip encoding for age/sex/gender columns
+
+    Returns:
+        Dict with column names as keys
+    """
+
+    # Load data
+    if isinstance(filepath_or_data, str):
+        data = load_csv_tsv(filepath_or_data, return_dict=True, convert_numeric=True)
+    else:
+        # Assume list of rows with header as first row
+        rows = filepath_or_data
+        if not rows:
+            return {}
+        headers = rows[0]
+        data = {h: [] for h in headers}
+        for row in rows[1:]:
+            for i, h in enumerate(headers):
+                val = row[i] if i < len(row) else ""
+                data[h].append(val)
+
+    if not compress:
+        return data
+
+    # Apply enum encoding
+    skip_columns = skip_columns or []
+    result = OrderedDict()
+
+    for col_name, col_values in data.items():
+        # Skip encoding for certain columns
+        should_skip = col_name in skip_columns
+        if is_participants and any(
+            x in col_name.lower() for x in ["age", "sex", "gender"]
+        ):
+            should_skip = True
+
+        if should_skip:
+            result[col_name] = col_values
+        else:
+            result[col_name] = encode_enum_column(col_values, compress=True)
+
+    return result
+
+
+def json2tsv(
+    data: Dict[str, Any],
+    filepath: str = None,
+    delimiter: str = "\t",
+) -> Union[str, None]:
+    """
+    Convert JSON dict back to TSV/CSV, handling _EnumKey_/_EnumValue_ encoded columns.
+
+    Args:
+        data: Dict with column names as keys (may contain enum-encoded columns)
+        filepath: Output file path. If None, returns string
+        delimiter: Column delimiter (default: tab)
+
+    Returns:
+        TSV string if filepath is None, otherwise None (writes to file)
+    """
+    if not data:
+        return "" if filepath is None else None
+
+    # Decode any enum-encoded columns
+    decoded_data = OrderedDict()
+    for col_name, col_values in data.items():
+        if is_enum_encoded(col_values):
+            decoded_data[col_name] = decode_enum_column(col_values)
+        elif isinstance(col_values, list):
+            decoded_data[col_name] = col_values
+        else:
+            # Single value or other type - wrap in list
+            decoded_data[col_name] = [col_values]
+
+    # Get column names and row count
+    col_names = list(decoded_data.keys())
+    if not col_names:
+        return "" if filepath is None else None
+
+    first_col = decoded_data[col_names[0]]
+    num_rows = len(first_col) if isinstance(first_col, list) else 1
+
+    # Build output lines
+    lines = []
+
+    # Header
+    lines.append(delimiter.join(str(c) for c in col_names))
+
+    # Data rows
+    for i in range(num_rows):
+        row = []
+        for col_name in col_names:
+            col_values = decoded_data[col_name]
+            if isinstance(col_values, list) and i < len(col_values):
+                val = col_values[i]
+            elif isinstance(col_values, np.ndarray) and i < len(col_values):
+                val = col_values[i]
+            else:
+                val = ""
+
+            # Handle None and numpy types
+            if val is None:
+                val = ""
+            elif isinstance(val, (np.integer, np.floating)):
+                val = val.item()
+            elif isinstance(val, float) and np.isnan(val):
+                val = "n/a"
+
+            row.append(str(val))
+        lines.append(delimiter.join(row))
+
+    output = "\n".join(lines) + "\n"
+
+    if filepath:
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(output)
+        return None
+
+    return output
+
+
+# =============================================================================
+# Update to save_csv_tsv - add compress parameter
+# =============================================================================
+
+
+def save_csv_tsv_with_enum(
+    data: Union[Dict[str, List], List[List]],
+    filename: str,
+    delimiter: str = None,
+    compress_enum: bool = False,
+    skip_columns: List[str] = None,
+    is_participants: bool = False,
+    **kwargs,
+):
+    """
+    Write data to CSV/TSV files with optional enum encoding for JSON output.
+
+    This is an enhanced version of save_csv_tsv that supports:
+    - Regular CSV/TSV output
+    - JSON output with _EnumKey_/_EnumValue_ encoding for repetitive columns
+
+    Args:
+        data: Dictionary with column data or list of rows
+        filename: Output file path
+        delimiter: Column delimiter. If None, auto-detect from filename
+        compress_enum: If True and filename ends with .json, use enum encoding
+        skip_columns: Column names to skip enum encoding
+        is_participants: If True, skip encoding for age/sex/gender columns
+        **kwargs: Additional arguments for csv.writer
+    """
+    # Check if JSON output requested
+    if filename.lower().endswith(".json") and compress_enum:
+        import json
+
+        if isinstance(data, list):
+            # Convert list of rows to dict
+            headers = data[0] if data else []
+            dict_data = {h: [] for h in headers}
+            for row in data[1:]:
+                for i, h in enumerate(headers):
+                    dict_data[h].append(row[i] if i < len(row) else "")
+            data = dict_data
+
+        # Apply enum encoding
+        encoded = OrderedDict()
+        skip_columns = skip_columns or []
+
+        for col_name, col_values in data.items():
+            should_skip = col_name in skip_columns
+            if is_participants and any(
+                x in col_name.lower() for x in ["age", "sex", "gender"]
+            ):
+                should_skip = True
+
+            if should_skip or not compress_enum:
+                encoded[col_name] = col_values
+            else:
+                encoded[col_name] = encode_enum_column(col_values, compress=True)
+
+        with open(filename, "w", encoding="utf-8") as f:
+            json.dump(encoded, f, separators=(",", ":"))
+    else:
+        # Regular CSV/TSV output - use existing save_csv_tsv
+        save_csv_tsv(data, filename, delimiter=delimiter, **kwargs)

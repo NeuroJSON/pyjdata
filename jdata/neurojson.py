@@ -24,6 +24,7 @@ from typing import Dict, Any, Tuple, Union
 import time
 from .jfile import jdlink
 from .jpath import jsonpath
+from .njprep import dataset2json
 
 
 def neuroj(
@@ -71,7 +72,7 @@ def neuroj(
         db: database name
         ds: dataset name
         file: attachment file name
-        **kwargs: additional keyward parameters, including
+        **kwargs: additional keyword parameters, including
             limit: limit the returned response items
             skip: offset of the retrieved record in the database
             raw: if set to True, return (res, restapi, jsonstring), otherwise, only return res
@@ -400,6 +401,61 @@ def neuroj(
                 payload,
                 {"method": "POST", "content_type": "application/json", **options},
             )
+
+    elif cmd == "convert":
+        # Convert local folders to JSON format
+        inputroot = kwargs.get("input")
+        outputroot = kwargs.get("output")
+
+        if not inputroot:
+            raise ValueError("convert requires 'input' parameter (input root folder)")
+        if not outputroot:
+            raise ValueError("convert requires 'output' parameter (output root folder)")
+
+        run = kwargs.get("run", False)  # dry-run by default
+        threads = kwargs.get("threads", 4)
+
+        result = dataset2json(
+            inputroot=inputroot,
+            outputroot=outputroot,
+            dbname=db,
+            dsname=ds,
+            filename=file,
+            convert=run,
+            threads=threads,
+            max_tsv=kwargs.get("max_tsv"),
+            max_json=kwargs.get("max_json"),
+            max_bjson=kwargs.get("max_bjson"),
+            max_bvec=kwargs.get("max_bvec"),
+            max_mat=kwargs.get("max_mat"),
+            fallback_url=kwargs.get("fallback_url"),
+            attach_url=kwargs.get("attach_url"),
+        )
+
+        if not run:
+            # Dry-run: print commands
+            print("=" * 60)
+            print("DRY-RUN MODE - Commands to be executed:")
+            print("=" * 60)
+            for cmd_str in result.get("commands", []):
+                print(f"  {cmd_str}")
+            print("=" * 60)
+            print(f"Add 'run=True' to execute conversion")
+        else:
+            # Print summary
+            print("=" * 60)
+            print(f"Status: {result['status']}")
+            print(f"Files converted: {result['files_processed']}")
+            print(f"Datasets: {', '.join(result['datasets_processed']) or 'none'}")
+            if result["errors"]:
+                print(f"Errors: {len(result['errors'])}")
+                for err in result["errors"][:10]:  # Show first 10 errors
+                    print(f"  - {err}")
+            print("=" * 60)
+
+        res = result
+        jsonstring = json.dumps(result)
+        restapi = f"file://{inputroot} -> file://{outputroot}"
 
     else:
         raise ValueError(f"Unknown command: {cmd}")
