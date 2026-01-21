@@ -151,7 +151,7 @@ from .jschema import jsonschema
 from .neurojson import neuroj, neurojgui
 from .njprep import dataset2json, NJPREP_DEFAULT
 
-__version__ = "0.9.2"
+__version__ = "0.9.3"
 __all__ = [
     "loadjson",
     "savejson",

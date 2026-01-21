@@ -1,10 +1,10 @@
 ![](https://neurojson.org/wiki/upload/neurojson_banner_long.png)
 
-# JData - NeuroJSON client with fast parsers for JSON, binary JSON, NIFTI, SNIRF, CSV/TSV, HDF5 data files
+# JData - NeuroJSON client with fast parsers for JSON, binary JSON, NIFTI, GIFTI, SNIRF, CSV/TSV, HDF5 data files
 
 - Copyright: (C) Qianqian Fang (2019-2026) <q.fang at neu.edu>
 - License: Apache License, Version 2.0
-- Version: 0.9.2
+- Version: 0.9.3
 - URL: https://github.com/NeuroJSON/pyjdata
 - Acknowledgement: This project is supported by US National Institute of Health (NIH)
   grant [U24-NS124027](https://reporter.nih.gov/project-details/10308329)
@@ -99,7 +99,9 @@ The `jdata` module further partition the functions into smaller submodules, incl
 - **jdata.jdata** provides `encode`, `decode`, `jdataencode`, `jdatadecode`, `{zlib,gzip,lzma,lz4,base64}encode`, `{zlib,gzip,lzma,lz4,base64}decode`
 - **jdata.jpath** provides `jsonpath`
 - **jdata.jnifti** provides `load{jnifti,nifti}`, `save{jnifti,nifti,jnii,bnii}`, `nii2jnii`, `jnii2nii`, `nifticreate`, `jnifticreate`, `niiformat`, `niicodemap`
+- **jdata.jgifti** provides `load{jgifti,gifti}`, `save{jgifti,gifti}`, `gii2jgii`, `jgii2gii`, `jgifticreate`, `giicodemap`, `JGifti`
 - **jdata.neurojson** provides `neuroj`, `neurojgui`
+- **jdata.njprep** provides `dataset2json`
 - **jdata.h5** provides `loadh5`, `saveh5`, `regrouph5`, `aos2soa`, `soa2aos`, `jsnirfcreate`, `snirfcreate`, `snirfdecode`
 
 All these functions can be found in the MATLAB/GNU Octave equivalent, JSONLab toolbox. Each function can be individually imported
