@@ -84,6 +84,27 @@ from .jdata import (
     base64decode,
 )
 from .jpath import jsonpath
+
+from .jgifti import (
+    JGifti,
+    gii2jgii,
+    jgii2gii,
+    loadgifti,
+    loadjgifti,
+    savegifti,
+    savejgifti,
+    jgifticreate,
+    giicodemap,
+    get_node,
+    get_face,
+    get_property,
+    get_properties,
+    get_labels,
+    get_metadata,
+    get_coord_system,
+    get_surfaces,
+)
+
 from .jnifti import (
     nii2jnii,
     jnii2nii,
@@ -215,6 +236,23 @@ __all__ = [
     "tsv2json",
     "json2tsv",
     "save_csv_tsv_with_enum",
+    "JGifti",
+    "gii2jgii",
+    "jgii2gii",
+    "loadgifti",
+    "loadjgifti",
+    "savegifti",
+    "savejgifti",
+    "jgifticreate",
+    "giicodemap",
+    "get_node",
+    "get_face",
+    "get_property",
+    "get_properties",
+    "get_labels",
+    "get_metadata",
+    "get_coord_system",
+    "get_surfaces",
 ]
 
 __license__ = """Apache license 2.0, Copyright (c) 2019-2026 Qianqian Fang"""

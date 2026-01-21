@@ -59,10 +59,21 @@ import warnings
 ##====================================================================================
 
 jext = {
-    "t": [".json", ".jdt", ".jdat", ".jnii", ".jmsh", ".jnirs", ".jbids"],
-    "b": [".ubj", ".bjd", ".jdb", ".jbat", ".bnii", ".bmsh", ".pmat", ".bnirs"],
+    "t": [".json", ".jdt", ".jdat", ".jnii", ".jgii", ".jmsh", ".jnirs", ".jbids"],
+    "b": [
+        ".ubj",
+        ".bjd",
+        ".jdb",
+        ".jbat",
+        ".bnii",
+        ".bgii",
+        ".bmsh",
+        ".pmat",
+        ".bnirs",
+    ],
     "h5": [".h5", ".hdf5", ".snirf", ".nwb"],
     "nii": [".nii", ".nii.gz", ".img", "img.gz"],
+    "gii": [".gii", ".gii.gz"],
     "csv": [".csv", ".csv.gz", ".tsv", "tsv.gz"],
 }
 
@@ -91,6 +102,8 @@ def load(fname, opt={}, **kwargs):
         return loadb(fname, opt, **kwargs)
     elif ext in jext["nii"]:
         return loadjnifti(fname, opt, **kwargs)
+    elif ext in jext["gii"]:
+        return loadgifti(fname, opt, **kwargs)
     elif ext in jext["csv"]:
         return load_csv_tsv(fname, **kwargs)
     else:
@@ -127,6 +140,8 @@ def save(data, fname, opt={}, **kwargs):
         saveh5(data, fname, **kwargs)
     elif ext in jext["nii"]:
         savenifti(data, fname, **kwargs)
+    elif ext in jext["gii"]:
+        savegifti(data, fname, **kwargs)
     else:
         raise Exception(
             "JData",
