@@ -231,8 +231,7 @@ def loadh5(filename, *args, **kwargs) -> Union[Dict, Tuple[Dict, Dict]]:
 
                         if opt["complexformat"][1] in data:
                             spd[indices] = (
-                                data[opt["complexformat"][0]]
-                                + 1j * data[opt["complexformat"][1]]
+                                data[opt["complexformat"][0]] + 1j * data[opt["complexformat"][1]]
                             )
                         else:
                             spd[indices] = data[opt["complexformat"][0]]
@@ -252,9 +251,9 @@ def loadh5(filename, *args, **kwargs) -> Union[Dict, Tuple[Dict, Dict]]:
 
                 for real_key, imag_key in complex_pairs:
                     if len(set(fields) & {real_key, imag_key}) == 2:
-                        if isinstance(
-                            data.get(real_key), (np.ndarray, int, float)
-                        ) and isinstance(data.get(imag_key), (np.ndarray, int, float)):
+                        if isinstance(data.get(real_key), (np.ndarray, int, float)) and isinstance(
+                            data.get(imag_key), (np.ndarray, int, float)
+                        ):
                             data = data[real_key] + 1j * data[imag_key]
                             break
 
@@ -262,9 +261,7 @@ def loadh5(filename, *args, **kwargs) -> Union[Dict, Tuple[Dict, Dict]]:
         if isinstance(data, (list, np.ndarray)) and len(data) > 0:
             if isinstance(data, np.ndarray) and data.dtype.kind in ["S", "U"]:
                 data = data.astype(str)
-            elif isinstance(data, list) and all(
-                isinstance(x, (str, bytes)) for x in data
-            ):
+            elif isinstance(data, list) and all(isinstance(x, (str, bytes)) for x in data):
                 if opt.get("stringarray", 0):
                     data = np.array(data, dtype=str)
 
@@ -334,9 +331,7 @@ def loadh5(filename, *args, **kwargs) -> Union[Dict, Tuple[Dict, Dict]]:
                     if gname in loc:
                         rootgid = loc[gname]
                         data, meta = {}, {}
-                        group_iterate(
-                            rootgid, dname, {"data": data, "meta": meta, "opt": opt}
-                        )
+                        group_iterate(rootgid, dname, {"data": data, "meta": meta, "opt": opt})
                     else:
                         raise KeyError(f"Path {path} not found")
             except Exception:
@@ -469,9 +464,7 @@ def saveh5(data: Any, fname, *args, **kwargs):
         """
         return obj2h5(f"{name}{idx}", item, handle, level, opt)
 
-    def cell2h5(
-        name: str, item: List, handle: h5py.Group, level: int, opt: Dict
-    ) -> List:
+    def cell2h5(name: str, item: List, handle: h5py.Group, level: int, opt: Dict) -> List:
         """
         Convert Python list to HDF5 groups/datasets
 
@@ -497,9 +490,7 @@ def saveh5(data: Any, fname, *args, **kwargs):
             # Single element
             return [obj2h5(name, item[0], handle, level, opt)] if item else []
 
-    def struct2h5(
-        name: str, item: Dict, handle: h5py.Group, level: int, opt: Dict
-    ) -> List:
+    def struct2h5(name: str, item: Dict, handle: h5py.Group, level: int, opt: Dict) -> List:
         """
         Convert Python dictionary to HDF5 group
 
@@ -527,9 +518,7 @@ def saveh5(data: Any, fname, *args, **kwargs):
         oid = []
 
         for field_name in names:
-            field_handle = obj2h5(
-                field_name, item[field_name], group_handle, level + 1, opt
-            )
+            field_handle = obj2h5(field_name, item[field_name], group_handle, level + 1, opt)
             oid.append(field_handle)
 
         return oid
@@ -748,9 +737,7 @@ def saveh5(data: Any, fname, *args, **kwargs):
             data["Real"] = item_copy["Real"]
             data["Imag"] = item_copy["Imag"]
         else:
-            dt = np.dtype(
-                [("SparseIndex", idx.dtype), ("Real", item_copy["Real"].dtype)]
-            )
+            dt = np.dtype([("SparseIndex", idx.dtype), ("Real", item_copy["Real"].dtype)])
             data = np.empty(len(idx), dtype=dt)
             data["SparseIndex"] = idx
             data["Real"] = item_copy["Real"]
@@ -791,9 +778,7 @@ def saveh5(data: Any, fname, *args, **kwargs):
     # Set default options
     opt["compression"] = opt.get("Compression", opt.get("compression", ""))
     opt["compresslevel"] = opt.get("CompressLevel", opt.get("compresslevel", 5))
-    opt["compressarraysize"] = opt.get(
-        "CompressArraySize", opt.get("compressarraysize", 100)
-    )
+    opt["compressarraysize"] = opt.get("CompressArraySize", opt.get("compressarraysize", 100))
     opt["unpackhex"] = opt.get("UnpackHex", opt.get("unpackhex", 1))
     opt["dotranspose"] = opt.get("Transpose", opt.get("transpose", 0))
     opt["variablelengthstring"] = opt.get(
@@ -906,11 +891,7 @@ def regrouph5(root: Union[Dict, Any], *args) -> Dict:
         for i, name in enumerate(names):
             # Use regex to match pattern: prefix + digits
             match = re.match(r"^(.*\D)(\d+)$", name)
-            if (
-                match
-                and int(match.group(2)) != 0
-                and match.group(1) not in root_list[0]
-            ):
+            if match and int(match.group(2)) != 0 and match.group(1) not in root_list[0]:
                 prefix = match.group(1)
                 number = int(match.group(2))
 
@@ -977,15 +958,10 @@ def regrouph5(root: Union[Dict, Any], *args) -> Dict:
             try:
                 # Check if all elements can be converted to numpy array
                 first_data = data[0][name]
-                if all(
-                    isinstance(item, (int, float, complex, np.ndarray))
-                    for item in first_data
-                ):
+                if all(isinstance(item, (int, float, complex, np.ndarray)) for item in first_data):
                     # Try to stack arrays
                     if all(isinstance(item, np.ndarray) for item in first_data):
-                        if all(
-                            item.shape == first_data[0].shape for item in first_data
-                        ):
+                        if all(item.shape == first_data[0].shape for item in first_data):
                             for j in range(len(data)):
                                 # Use Fortran order (column-major) for flattening/stacking
                                 data[j][name] = np.stack(data[j][name], axis=0)
@@ -993,7 +969,7 @@ def regrouph5(root: Union[Dict, Any], *args) -> Dict:
                         # Convert to numpy array for numeric data
                         for j in range(len(data)):
                             data[j][name] = np.array(data[j][name], order="F")
-            except:
+            except Exception:
                 # Keep as list if conversion fails
                 pass
 
@@ -1076,7 +1052,7 @@ def aos2soa(starray: Union[List[Dict], Dict]) -> Dict:
             else:
                 # For scalars and other types, create numpy array or keep as list
                 st[field_name] = np.array(field_values, order="F")
-        except:
+        except Exception:
             # Keep as list if concatenation fails
             st[field_name] = field_values
 
@@ -1110,8 +1086,7 @@ def soa2aos(starray: Dict) -> List[Dict]:
 
     # Get sizes of all fields
     allsize = [
-        len(v) if hasattr(v, "__len__") and not isinstance(v, str) else 1
-        for v in starray.values()
+        len(v) if hasattr(v, "__len__") and not isinstance(v, str) else 1 for v in starray.values()
     ]
 
     # If not all fields have the same size, return original
@@ -1219,9 +1194,7 @@ def jsnirfcreate(*args, **kwargs) -> Dict:
     jsn = OrderedDict()
 
     # Return either a SNIRF data structure, or JSNIRF data (enclosed in SNIRFData tag)
-    is_snirf = (
-        len(args) == 1 and isinstance(args[0], str) and args[0].lower() == "snirf"
-    ) or (
+    is_snirf = (len(args) == 1 and isinstance(args[0], str) and args[0].lower() == "snirf") or (
         "format" in nirsdata
         and isinstance(nirsdata["format"], str)
         and nirsdata["format"].lower() == "snirf"
@@ -1309,12 +1282,7 @@ def snirfdecode(root: Dict, *args) -> Dict:
         if isinstance(args[0], str) and args[0].lower() == "jsnirf":
             issnirf = 0
 
-    if (
-        issnirf == 0
-        and "nirs" in data
-        and "formatVersion" in data
-        and "SNIRFData" not in data
-    ):
+    if issnirf == 0 and "nirs" in data and "formatVersion" in data and "SNIRFData" not in data:
         data["SNIRFData"] = data["nirs"]
 
         # Handle measurementList conversion
@@ -1332,9 +1300,7 @@ def snirfdecode(root: Dict, *args) -> Dict:
             for i in range(len(data["nirs"])):
                 data["SNIRFData"][i]["formatVersion"] = data["formatVersion"]
                 # Move formatVersion to first position (equivalent to orderfields)
-                data["SNIRFData"][i] = _move_field_to_first(
-                    data["SNIRFData"][i], "formatVersion"
-                )
+                data["SNIRFData"][i] = _move_field_to_first(data["SNIRFData"][i], "formatVersion")
         else:
             data["SNIRFData"]["formatVersion"] = data["formatVersion"]
             # Move formatVersion to first position

@@ -41,9 +41,7 @@ from collections import defaultdict
 def nii2jnii(filename, format="jnii", *varargin, **kwargs):
     hdrfile = filename
     isnii = -1
-    if re.search(
-        r"(\.[Hh][Dd][Rr](\.[Gg][Zz])*$|\.[Ii][Mm][Gg](\.[Gg][Zz])*$)", filename
-    ):
+    if re.search(r"(\.[Hh][Dd][Rr](\.[Gg][Zz])*$|\.[Ii][Mm][Gg](\.[Gg][Zz])*$)", filename):
         isnii = 0
     elif re.search(r"\.[Nn][Ii][Ii](\.[Gg][Zz])*$", filename):
         isnii = 1
@@ -188,9 +186,7 @@ def nii2jnii(filename, format="jnii", *varargin, **kwargs):
     if re.search(r"\.[Hh][Dd][Rr](\.[Gg][Zz])*$", filename):
         filename = re.sub(r"\.[Hh][Dd][Rr](\.[Gg][Zz])*$", ".img\g<1>", filename)
 
-    imgbytenum = (
-        np.prod(nii["hdr"]["dim"][1 : nii["hdr"]["dim"][0] + 1]) * nii["voxelbyte"]
-    )
+    imgbytenum = np.prod(nii["hdr"]["dim"][1 : nii["hdr"]["dim"][0] + 1]) * nii["voxelbyte"]
 
     if isnii == 0 and re.search(r"\.[Gg][Zz]$", filename):
         with open(filename, "rb") as finput:
@@ -230,12 +226,8 @@ def nii2jnii(filename, format="jnii", *varargin, **kwargs):
             count = 0
             bufpos = nii0["hdr"]["sizeof_hdr"] + 4
             while bufpos < nii0["hdr"]["vox_offset"]:
-                size = (
-                    struct.unpack(dataendian + "I", gzdata[bufpos : bufpos + 4])[0] - 8
-                )
-                type = struct.unpack(dataendian + "I", gzdata[bufpos + 4 : bufpos + 8])[
-                    0
-                ]
+                size = struct.unpack(dataendian + "I", gzdata[bufpos : bufpos + 4])[0] - 8
+                type = struct.unpack(dataendian + "I", gzdata[bufpos + 4 : bufpos + 8])[0]
                 bufpos += 8
                 if bufpos + size <= nii0["hdr"]["vox_offset"]:
                     nii["NIFTIExtension"].append(
@@ -845,12 +837,10 @@ def niiheader2jnii(nii0):
     nii["NIFTIHeader"] = defaultdict()
     nii["NIFTIHeader"]["NIIHeaderSize"] = nii0["hdr"]["sizeof_hdr"]
     if "data_type" in nii0["hdr"]:
-        nii["NIFTIHeader"]["A75DataTypeName"] = "".join(
-            map(chr, nii0["hdr"]["data_type"])
-        ).rstrip("\x00")
-        nii["NIFTIHeader"]["A75DBName"] = "".join(
-            map(chr, nii0["hdr"]["db_name"])
-        ).rstrip("\x00")
+        nii["NIFTIHeader"]["A75DataTypeName"] = "".join(map(chr, nii0["hdr"]["data_type"])).rstrip(
+            "\x00"
+        )
+        nii["NIFTIHeader"]["A75DBName"] = "".join(map(chr, nii0["hdr"]["db_name"])).rstrip("\x00")
         nii["NIFTIHeader"]["A75Extends"] = nii0["hdr"]["extents"]
         nii["NIFTIHeader"]["A75SessionError"] = nii0["hdr"]["session_error"]
         nii["NIFTIHeader"]["A75Regular"] = nii0["hdr"]["regular"]
@@ -866,9 +856,7 @@ def niiheader2jnii(nii0):
     nii["NIFTIHeader"]["DataType"] = niicodemap("datatype", nii0["hdr"]["datatype"])
     nii["NIFTIHeader"]["BitDepth"] = nii0["hdr"]["bitpix"]
     nii["NIFTIHeader"]["FirstSliceID"] = nii0["hdr"]["slice_start"]
-    nii["NIFTIHeader"]["VoxelSize"] = nii0["hdr"]["pixdim"][
-        1 : 1 + nii0["hdr"]["dim"][0]
-    ]
+    nii["NIFTIHeader"]["VoxelSize"] = nii0["hdr"]["pixdim"][1 : 1 + nii0["hdr"]["dim"][0]]
     nii["NIFTIHeader"]["Orientation"] = {"x": "r", "y": "a", "z": "s"}
     if nii0["hdr"]["pixdim"][0] < 0:
         nii["NIFTIHeader"]["Orientation"] = {"x": "l", "y": "a", "z": "s"}
@@ -879,9 +867,7 @@ def niiheader2jnii(nii0):
     nii["NIFTIHeader"]["SliceType"] = niicodemap("slicetype", nii0["hdr"]["slice_code"])
     nii["NIFTIHeader"]["Unit"] = defaultdict()
     nii["NIFTIHeader"]["Unit"]["L"] = niicodemap("unit", nii0["hdr"]["xyzt_units"] & 7)
-    nii["NIFTIHeader"]["Unit"]["T"] = niicodemap(
-        "unit", (nii0["hdr"]["xyzt_units"] >> 3) & 7
-    )
+    nii["NIFTIHeader"]["Unit"]["T"] = niicodemap("unit", (nii0["hdr"]["xyzt_units"] >> 3) & 7)
     nii["NIFTIHeader"]["MaxIntensity"] = nii0["hdr"]["cal_max"]
     nii["NIFTIHeader"]["MinIntensity"] = nii0["hdr"]["cal_min"]
     nii["NIFTIHeader"]["SliceTime"] = nii0["hdr"]["slice_duration"]
@@ -889,12 +875,8 @@ def niiheader2jnii(nii0):
     if "glmax" in nii0["hdr"]:
         nii["NIFTIHeader"]["A75GlobalMax"] = nii0["hdr"]["glmax"]
         nii["NIFTIHeader"]["A75GlobalMin"] = nii0["hdr"]["glmin"]
-    nii["NIFTIHeader"]["Description"] = "".join(
-        map(chr, nii0["hdr"]["descrip"])
-    ).rstrip("\x00")
-    nii["NIFTIHeader"]["AuxFile"] = "".join(map(chr, nii0["hdr"]["aux_file"])).rstrip(
-        "\x00"
-    )
+    nii["NIFTIHeader"]["Description"] = "".join(map(chr, nii0["hdr"]["descrip"])).rstrip("\x00")
+    nii["NIFTIHeader"]["AuxFile"] = "".join(map(chr, nii0["hdr"]["aux_file"])).rstrip("\x00")
     nii["NIFTIHeader"]["QForm"] = nii0["hdr"]["qform_code"]
     nii["NIFTIHeader"]["SForm"] = nii0["hdr"]["sform_code"]
     nii["NIFTIHeader"]["Quatern"] = defaultdict()
@@ -912,12 +894,8 @@ def niiheader2jnii(nii0):
             nii0["hdr"]["srow_z"],
         ]
     )
-    nii["NIFTIHeader"]["Name"] = "".join(map(chr, nii0["hdr"]["intent_name"])).rstrip(
-        "\x00"
-    )
-    nii["NIFTIHeader"]["NIIFormat"] = "".join(map(chr, nii0["hdr"]["magic"])).rstrip(
-        "\x00"
-    )
+    nii["NIFTIHeader"]["Name"] = "".join(map(chr, nii0["hdr"]["intent_name"])).rstrip("\x00")
+    nii["NIFTIHeader"]["NIIFormat"] = "".join(map(chr, nii0["hdr"]["magic"])).rstrip("\x00")
     if "extension" in nii0["hdr"]:
         nii["NIFTIHeader"]["NIIExtender"] = nii0["hdr"]["extension"]
     nii["NIFTIHeader"]["NIIQfac_"] = nii0["hdr"]["pixdim"][0]
@@ -990,18 +968,12 @@ def jnii2nii(jnii, niifile=None):
     nii = nifticreate(jnii["NIFTIData"], niiformat)
 
     if "NIIHeaderSize" in hdr:
-        nii["hdr"]["sizeof_hdr"] = bytematch(
-            hdr, "NIIHeaderSize", nii["hdr"]["sizeof_hdr"]
-        )
+        nii["hdr"]["sizeof_hdr"] = bytematch(hdr, "NIIHeaderSize", nii["hdr"]["sizeof_hdr"])
     if "data_type" in nii["hdr"]:
-        nii["hdr"]["data_type"] = bytematch(
-            hdr, "A75DataTypeName", nii["hdr"]["data_type"]
-        )
+        nii["hdr"]["data_type"] = bytematch(hdr, "A75DataTypeName", nii["hdr"]["data_type"])
         nii["hdr"]["db_name"] = bytematch(hdr, "A75DBName", nii["hdr"]["db_name"])
         nii["hdr"]["extents"] = bytematch(hdr, "A75Extends", nii["hdr"]["extents"])
-        nii["hdr"]["session_error"] = bytematch(
-            hdr, "A75SessionError", nii["hdr"]["session_error"]
-        )
+        nii["hdr"]["session_error"] = bytematch(hdr, "A75SessionError", nii["hdr"]["session_error"])
         nii["hdr"]["regular"] = bytematch(hdr, "A75Regular", nii["hdr"]["regular"])
 
     dim_info = np.bitwise_or(
@@ -1031,9 +1003,7 @@ def jnii2nii(jnii, niifile=None):
 
     nii["hdr"]["datatype"] = bytematch(hdr, "DataType", nii["hdr"]["datatype"])
     nii["hdr"]["bitpix"] = bytematch(hdr, "BitDepth", nii["hdr"]["bitpix"])
-    nii["hdr"]["slice_start"] = bytematch(
-        hdr, "FirstSliceID", nii["hdr"]["slice_start"]
-    )
+    nii["hdr"]["slice_start"] = bytematch(hdr, "FirstSliceID", nii["hdr"]["slice_start"])
     nii["hdr"]["pixdim"][0] = len(hdr["VoxelSize"])
     nii["hdr"]["pixdim"][1 : 1 + nii["hdr"]["dim"][0] - 1] = bytematch(
         hdr,
@@ -1061,9 +1031,7 @@ def jnii2nii(jnii, niifile=None):
 
     nii["hdr"]["cal_max"] = bytematch(hdr, "MaxIntensity", nii["hdr"]["cal_max"])
     nii["hdr"]["cal_min"] = bytematch(hdr, "MinIntensity", nii["hdr"]["cal_min"])
-    nii["hdr"]["slice_duration"] = bytematch(
-        hdr, "SliceTime", nii["hdr"]["slice_duration"]
-    )
+    nii["hdr"]["slice_duration"] = bytematch(hdr, "SliceTime", nii["hdr"]["slice_duration"])
     nii["hdr"]["toffset"] = bytematch(hdr, "TimeOffset", nii["hdr"]["toffset"])
     if "glmax" in nii["hdr"]:
         nii["hdr"]["glmax"] = bytematch(hdr, "A75GlobalMax", nii["hdr"]["glmax"])
@@ -1077,15 +1045,9 @@ def jnii2nii(jnii, niifile=None):
     nii["hdr"]["quatern_b"] = bytematch(hdr["Quatern"], "b", nii["hdr"]["quatern_b"])
     nii["hdr"]["quatern_c"] = bytematch(hdr["Quatern"], "c", nii["hdr"]["quatern_c"])
     nii["hdr"]["quatern_d"] = bytematch(hdr["Quatern"], "d", nii["hdr"]["quatern_d"])
-    nii["hdr"]["qoffset_x"] = bytematch(
-        hdr["QuaternOffset"], "x", nii["hdr"]["qoffset_x"]
-    )
-    nii["hdr"]["qoffset_y"] = bytematch(
-        hdr["QuaternOffset"], "y", nii["hdr"]["qoffset_y"]
-    )
-    nii["hdr"]["qoffset_z"] = bytematch(
-        hdr["QuaternOffset"], "z", nii["hdr"]["qoffset_z"]
-    )
+    nii["hdr"]["qoffset_x"] = bytematch(hdr["QuaternOffset"], "x", nii["hdr"]["qoffset_x"])
+    nii["hdr"]["qoffset_y"] = bytematch(hdr["QuaternOffset"], "y", nii["hdr"]["qoffset_y"])
+    nii["hdr"]["qoffset_z"] = bytematch(hdr["QuaternOffset"], "z", nii["hdr"]["qoffset_z"])
 
     affine = np.array(hdr["Affine"])
     nii["hdr"]["srow_x"] = affine[0].astype(nii["hdr"]["srow_x"].dtype)
@@ -1106,9 +1068,7 @@ def jnii2nii(jnii, niifile=None):
         nii["extension"] = jnii["NIFTIExtension"]
         if nii["hdr"]["extension"][0] != len(jnii["NIFTIExtension"]):
             nii["hdr"]["extension"][0] = len(jnii["NIFTIExtension"])
-            warnings.warn(
-                "header extension count does not match the extension data, force update"
-            )
+            warnings.warn("header extension count does not match the extension data, force update")
 
     if niifile is not None:
         savenifti(nii["img"], niifile, nii["hdr"])
@@ -1218,9 +1178,7 @@ def nifticreate(img, format="nifti1", niihdr0=None, **kwargs):
 
     if np_dtype_str not in datatype_map:
         raise ValueError(f"Unsupported image data type: {np_dtype_str}")
-    header["datatype"] = np.array(
-        datatype_map[np_dtype_str], dtype=header["datatype"].dtype
-    )
+    header["datatype"] = np.array(datatype_map[np_dtype_str], dtype=header["datatype"].dtype)
 
     # Fill dim and pixdim
     ndim = img.ndim
@@ -1234,9 +1192,7 @@ def nifticreate(img, format="nifti1", niihdr0=None, **kwargs):
 
     # Set magic
     if headerlen == 540:
-        header["magic"] = np.frombuffer(
-            b"ni2\x00\x00\x00\x00\x00", dtype=type(header["magic"][0])
-        )
+        header["magic"] = np.frombuffer(b"ni2\x00\x00\x00\x00\x00", dtype=type(header["magic"][0]))
     else:
         header["magic"] = np.frombuffer(b"ni1\x00", dtype=type(header["magic"][0]))
 
@@ -1311,9 +1267,7 @@ def jnifticreate(*args, **kwargs):
         jnii["NIFTIHeader"]["Dim"] = img.shape
         jnii["NIFTIHeader"]["DataType"] = img.dtype.name
         info = (
-            np.iinfo(img.dtype)
-            if issubclass(img.dtype.type, np.integer)
-            else np.finfo(img.dtype)
+            np.iinfo(img.dtype) if issubclass(img.dtype.type, np.integer) else np.finfo(img.dtype)
         )
         jnii["NIFTIHeader"]["BitDepth"] = info.bits
         jnii["NIFTIHeader"]["MinIntensity"] = np.min(img)
@@ -1435,9 +1389,7 @@ def savejnifti(jnii, filename, *args):
            supported options for savejson (part of JSONLab).
     """
     if not filename.endswith((".jnii", ".bnii")):
-        raise ValueError(
-            "File suffix must be .jnii for text JNIfTI or .bnii for binary JNIfTI"
-        )
+        raise ValueError("File suffix must be .jnii for text JNIfTI or .bnii for binary JNIfTI")
 
     if filename.endswith(".jnii"):
         # Assuming savejnii is available from JSONLab

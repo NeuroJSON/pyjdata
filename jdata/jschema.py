@@ -42,9 +42,7 @@ _BINTYPES = {
 }
 
 
-def jsonschema(
-    data: Any, schema: Any = None, **kwargs
-) -> Union[Tuple[bool, List[str]], Any]:
+def jsonschema(data: Any, schema: Any = None, **kwargs) -> Union[Tuple[bool, List[str]], Any]:
     """
     Validate data against JSON Schema or generate data from schema.
 
@@ -98,9 +96,7 @@ def _load_schema(schema_source: str) -> dict:
             return json.load(f)
 
 
-def _validatedata(
-    data: Any, schema: Any, path: str, opts: dict
-) -> Tuple[bool, List[str]]:
+def _validatedata(data: Any, schema: Any, path: str, opts: dict) -> Tuple[bool, List[str]]:
     rootschema = opts.get("rootschema", schema)
     valid = True
     errors = []
@@ -222,7 +218,7 @@ def _values_equal(a, b):
         return True
     try:
         return a == b
-    except:
+    except Exception:
         return False
 
 
@@ -313,9 +309,7 @@ def _resolveref(ref: str, root: dict) -> Optional[dict]:
     return current
 
 
-def _validatenumeric(
-    data: Union[int, float], schema: dict, path: str
-) -> Tuple[bool, List[str]]:
+def _validatenumeric(data: Union[int, float], schema: dict, path: str) -> Tuple[bool, List[str]]:
     valid = True
     errors = []
 
@@ -369,9 +363,7 @@ def _validatebinary(data, schema: dict, path: str) -> Tuple[bool, List[str]]:
 
         if len(dims) == 1:  # Vector check
             actual = (
-                max(data.shape)
-                if data.ndim <= 2 and (data.ndim == 1 or 1 in data.shape)
-                else -1
+                max(data.shape) if data.ndim <= 2 and (data.ndim == 1 or 1 in data.shape) else -1
             )
             if actual < 0:
                 valid, errors = False, errors + [f"{path}: expected 1D array"]
@@ -445,7 +437,7 @@ def _validatearray(data, schema: dict, path: str, opts: dict) -> Tuple[bool, Lis
                         valid = False
                         errors.append(f"{path}: duplicate items")
                         break
-                except:
+                except Exception:
                     pass
             if not valid:
                 break
@@ -454,9 +446,7 @@ def _validatearray(data, schema: dict, path: str, opts: dict) -> Tuple[bool, Lis
         items = schema["items"]
         if isinstance(items, list):
             for i in range(min(length, len(items))):
-                isvalid, errmsg = _validatedata(
-                    getelem(i), items[i], f"{path}[{i}]", opts
-                )
+                isvalid, errmsg = _validatedata(getelem(i), items[i], f"{path}[{i}]", opts)
                 if not isvalid:
                     valid = False
                     errors.extend(errmsg)
@@ -481,9 +471,7 @@ def _validatearray(data, schema: dict, path: str, opts: dict) -> Tuple[bool, Lis
     return valid, errors
 
 
-def _validateobject(
-    data: dict, schema: dict, path: str, opts: dict
-) -> Tuple[bool, List[str]]:
+def _validateobject(data: dict, schema: dict, path: str, opts: dict) -> Tuple[bool, List[str]]:
     valid = True
     errors = []
     numkeys = len(data)
@@ -507,9 +495,7 @@ def _validateobject(
         for pname, pschema in props.items():
             if pname in data:
                 validatedkeys.add(pname)
-                isvalid, errmsg = _validatedata(
-                    data[pname], pschema, f"{path}.{pname}", opts
-                )
+                isvalid, errmsg = _validatedata(data[pname], pschema, f"{path}.{pname}", opts)
                 if not isvalid:
                     valid = False
                     errors.extend(errmsg)
@@ -545,9 +531,7 @@ def _validateobject(
     return valid, errors
 
 
-def _validatecomposition(
-    data: Any, schema: dict, path: str, opts: dict
-) -> Tuple[bool, List[str]]:
+def _validatecomposition(data: Any, schema: dict, path: str, opts: dict) -> Tuple[bool, List[str]]:
     valid = True
     errors = []
 
@@ -570,9 +554,7 @@ def _validatecomposition(
             errors.append(f"{path}: anyOf not satisfied")
 
     if "oneOf" in schema:
-        matchcount = sum(
-            1 for s in schema["oneOf"] if _validatedata(data, s, path, opts)[0]
-        )
+        matchcount = sum(1 for s in schema["oneOf"] if _validatedata(data, s, path, opts)[0])
         if matchcount != 1:
             valid = False
             errors.append(f"{path}: oneOf matched {matchcount}")
@@ -618,11 +600,7 @@ def _generatedata(schema: dict, opts: dict) -> Any:
     if "binType" in schema:
         dtype = _BINTYPES.get(schema["binType"], np.float64)
         dims = schema.get("minDims", 1)
-        dims = (
-            (int(dims),)
-            if isinstance(dims, (int, float))
-            else tuple(int(d) for d in dims)
-        )
+        dims = (int(dims),) if isinstance(dims, (int, float)) else tuple(int(d) for d in dims)
         return np.zeros(dims, dtype=dtype)
 
     if schematype == "null":

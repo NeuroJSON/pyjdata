@@ -85,7 +85,7 @@ _allownumpy = ("_ArraySize_", "_ArrayData_", "_ArrayZipSize_", "_ArrayZipData_")
 ##====================================================================================
 
 
-def encode(d, opt={}, **kwargs):
+def encode(d, opt=None, **kwargs):
     """@brief Encoding a Python data structure to portable JData-annotated dict constructs
 
     This function converts complex data types (usually not JSON-serializable) into
@@ -98,7 +98,10 @@ def encode(d, opt={}, **kwargs):
                         'blosc2lz4hc','blosc2zlib','blosc2zstd'] for compression codec, default is None
          'nthread': number of compression thread of the codec is of the blosc2 class, default is 1
     """
-
+    if opt is None:
+        opt = {}
+    kwargs.setdefault("compression", "zlib")
+    kwargs.setdefault("compressarraysize", 200)
     opt.setdefault("inplace", False)
     opt.update(kwargs)
 
@@ -138,11 +141,11 @@ def encode(d, opt={}, **kwargs):
             return "_Inf_" if (d > 0) else "-_Inf_"
         return d
     elif isinstance(d, list) or isinstance(d, set):
-        return encodelist(d, opt)
+        return encodelist(d, **opt)
     elif isinstance(d, tuple) or isinstance(d, frozenset):
-        return encodelist(list(d), opt)
+        return encodelist(list(d), **opt)
     elif isinstance(d, dict):
-        return encodedict(d, opt)
+        return encodedict(d, **opt)
     elif isinstance(d, complex):
         newobj = {
             "_ArrayType_": "double",
@@ -153,9 +156,7 @@ def encode(d, opt={}, **kwargs):
         return newobj
     elif isinstance(d, np.ndarray) or np.iscomplex(d):
         newobj = {}
-        newobj["_ArrayType_"] = (
-            jdtype[str(d.dtype)] if (str(d.dtype) in jdtype) else str(d.dtype)
-        )
+        newobj["_ArrayType_"] = jdtype[str(d.dtype)] if (str(d.dtype) in jdtype) else str(d.dtype)
         if np.isscalar(d):
             newobj["_ArraySize_"] = 1
         else:
@@ -192,9 +193,7 @@ def encode(d, opt={}, **kwargs):
                         newobj["_ArrayZipData_"], lzma.FORMAT_ALONE
                     )
                 except Exception:
-                    print(
-                        'you must install "lzma" module to compress with this format, ignoring'
-                    )
+                    print('you must install "lzma" module to compress with this format, ignoring')
                     pass
             elif opt["compression"] == "lz4":
                 try:
@@ -202,9 +201,7 @@ def encode(d, opt={}, **kwargs):
                         newobj["_ArrayZipData_"].tobytes()
                     )
                 except ImportError:
-                    print(
-                        'you must install "lz4" module to compress with this format, ignoring'
-                    )
+                    print('you must install "lz4" module to compress with this format, ignoring')
                     pass
             elif opt["compression"].startswith("blosc2"):
                 try:
@@ -225,13 +222,9 @@ def encode(d, opt={}, **kwargs):
                         nthreads=blosc2nthread,
                     )
                 except ImportError:
-                    print(
-                        'you must install "blosc2" module to compress with this format, ignoring'
-                    )
+                    print('you must install "blosc2" module to compress with this format, ignoring')
                     pass
-            if (("base64" in opt) and (opt["base64"])) or opt[
-                "compression"
-            ] == "base64":
+            if (("base64" in opt) and (opt["base64"])) or opt["compression"] == "base64":
                 newobj["_ArrayZipData_"] = base64.b64encode(newobj["_ArrayZipData_"])
             newobj.pop("_ArrayData_")
         return newobj
@@ -244,7 +237,7 @@ def encode(d, opt={}, **kwargs):
 ##====================================================================================
 
 
-def decode(d, opt={}, **kwargs):
+def decode(d, opt=None, **kwargs):
     """@brief Decoding a JData-annotated dict construct into native Python data
 
     This function converts portable JData-annotated dict/list constructs back to native Python
@@ -255,18 +248,15 @@ def decode(d, opt={}, **kwargs):
          'nthread': number of decompression thread of the codec is of the blosc2 class, default is 1
     """
 
+    if opt is None:
+        opt = {}
     from .jfile import jdlink
 
     opt.setdefault("inplace", False)
     opt.setdefault("maxlinklevel", 0)
     opt.update(kwargs)
 
-    if (
-        (isinstance(d, str) or type(d) == "unicode")
-        and len(d) <= 6
-        and len(d) > 4
-        and d[-1] == "_"
-    ):
+    if (isinstance(d, str) or type(d) == "unicode") and len(d) <= 6 and len(d) > 4 and d[-1] == "_":
         if d == "_NaN_":
             return float("nan")
         elif d == "_Inf_":
@@ -275,9 +265,9 @@ def decode(d, opt={}, **kwargs):
             return float("-inf")
         return d
     elif isinstance(d, list) or isinstance(d, set):
-        return decodelist(d, opt)
+        return decodelist(d, **opt)
     elif isinstance(d, tuple) or isinstance(d, frozenset):
-        return decodelist(list(d), opt)
+        return decodelist(list(d), **opt)
     elif isinstance(d, dict):
         if "_ArrayType_" in d:
             if isinstance(d["_ArraySize_"], str):
@@ -291,9 +281,7 @@ def decode(d, opt={}, **kwargs):
                 if "_ArrayZipType_" in d and d["_ArrayZipType_"] not in _zipper:
                     raise Exception(
                         "JData",
-                        "compression method {} is not supported".format(
-                            d["_ArrayZipType_"]
-                        ),
+                        "compression method {} is not supported".format(d["_ArrayZipType_"]),
                     )
                 if d["_ArrayZipType_"] == "zlib":
                     newobj = zlib.decompress(bytes(newobj))
@@ -334,9 +322,9 @@ def decode(d, opt={}, **kwargs):
                     except Exception as e:
                         raise ValueError(f"blosc2 decompression failed: {e}")
 
-                newobj = np.frombuffer(
-                    bytearray(newobj), dtype=np.dtype(d["_ArrayType_"])
-                ).reshape(d["_ArrayZipSize_"])
+                newobj = np.frombuffer(bytearray(newobj), dtype=np.dtype(d["_ArrayType_"])).reshape(
+                    d["_ArrayZipSize_"]
+                )
                 if "_ArrayIsComplex_" in d and newobj.shape[0] == 2:
                     newobj = newobj[0] + 1j * newobj[1]
                 if "_ArrayOrder_" in d and (
@@ -352,18 +340,12 @@ def decode(d, opt={}, **kwargs):
                 return newobj
             elif "_ArrayData_" in d:
                 if isinstance(d["_ArrayData_"], str):
-                    newobj = np.frombuffer(
-                        d["_ArrayData_"], dtype=np.dtype(d["_ArrayType_"])
-                    )
+                    newobj = np.frombuffer(d["_ArrayData_"], dtype=np.dtype(d["_ArrayType_"]))
                 else:
-                    newobj = np.asarray(
-                        d["_ArrayData_"], dtype=np.dtype(d["_ArrayType_"])
-                    )
+                    newobj = np.asarray(d["_ArrayData_"], dtype=np.dtype(d["_ArrayType_"]))
                 if "_ArrayZipSize_" in d and newobj.shape[0] == 1:
                     if isinstance(d["_ArrayZipSize_"], str):
-                        d["_ArrayZipSize_"] = np.frombuffer(
-                            bytearray(d["_ArrayZipSize_"])
-                        )
+                        d["_ArrayZipSize_"] = np.frombuffer(bytearray(d["_ArrayZipSize_"]))
                     newobj = newobj.reshape(d["_ArrayZipSize_"])
                 if "_ArrayIsComplex_" in d and newobj.shape[0] == 2:
                     newobj = newobj[0] + 1j * newobj[1]
@@ -410,7 +392,7 @@ def decode(d, opt={}, **kwargs):
                             "JData",
                             "_DataLink_ contains invalid URL",
                         )
-        return decodedict(d, opt)
+        return decodedict(d, **opt)
     else:
         return copy.deepcopy(d) if opt["inplace"] else d
 
@@ -440,13 +422,13 @@ def jsonfilter(obj):
 # -------------------------------------------------------------------------------------
 
 
-def encodedict(d0, opt={}):
+def encodedict(d0, **kwargs):
     d = dict(d0)
     for k, v in d0.items():
         if isinstance(v, np.ndarray) and isinstance(k, str) and (k in _allownumpy):
             continue
-        newkey = encode(k, opt)
-        d[newkey] = encode(v, opt)
+        newkey = encode(k, **kwargs)
+        d[newkey] = encode(v, **kwargs)
         if k != newkey:
             d.pop(k)
     return d
@@ -455,22 +437,24 @@ def encodedict(d0, opt={}):
 # -------------------------------------------------------------------------------------
 
 
-def encodelist(d0, opt={}):
-    if opt["inplace"]:
+def encodelist(d0, **kwargs):
+    if kwargs.get("inplace", False):
         d = [copy.deepcopy(x) if not isinstance(x, np.ndarray) else x for x in d0]
+    else:
+        d = list(d0)
     for i, s in enumerate(d):
-        d[i] = encode(s, opt)
+        d[i] = encode(s, **kwargs)
     return d
 
 
 # -------------------------------------------------------------------------------------
 
 
-def decodedict(d0, opt={}):
+def decodedict(d0, **kwargs):
     d = dict(d0)
     for k, v in d.items():
-        newkey = encode(k, opt)
-        d[newkey] = decode(v, opt)
+        newkey = encode(k, **kwargs)
+        d[newkey] = decode(v, **kwargs)
         if k != newkey:
             d.pop(k)
     return d
@@ -479,11 +463,13 @@ def decodedict(d0, opt={}):
 # -------------------------------------------------------------------------------------
 
 
-def decodelist(d0, opt={}):
-    if opt["inplace"]:
+def decodelist(d0, **kwargs):
+    if kwargs.get("inplace", False):
         d = [copy.deepcopy(x) if not isinstance(x, np.ndarray) else x for x in d0]
+    else:
+        d = list(d0)
     for i, s in enumerate(d):
-        d[i] = decode(s, opt)
+        d[i] = decode(s, **kwargs)
     return d
 
 

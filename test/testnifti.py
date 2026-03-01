@@ -29,9 +29,7 @@ import numpy as np
 class Test_jnifti(unittest.TestCase):
     @classmethod
     def setUpClass(self, *args, **kwargs):
-        self.jnii = loadurl(
-            "https://neurojson.io:7777/unc-012-infant-atlas/infant-1yr-seg"
-        )
+        self.jnii = loadurl("https://neurojson.io:7777/unc-012-infant-atlas/infant-1yr-seg")
         self.nii = jnii2nii(self.jnii)
 
     def test_jnii_img(self):
@@ -54,9 +52,7 @@ class Test_jnifti(unittest.TestCase):
         self.assertEqual(hdr["VoxelSize"], [1, 1, 1])
         self.assertEqual(hdr["NIIExtender"], [0, 0, 0, 0])
         self.assertEqual(hdr["Quatern"]["d"], 1)
-        self.assertEqual(
-            hdr["Affine"], [[1, 0, 0, -89], [0, 1, 0, -125], [0, 0, 1, -71]]
-        )
+        self.assertEqual(hdr["Affine"], [[1, 0, 0, -89], [0, 1, 0, -125], [0, 0, 1, -71]])
 
     def test_jnii2nii(self):
         hdr = self.nii["hdr"]
@@ -106,9 +102,7 @@ class Test_jnifti(unittest.TestCase):
         self.assertEqual(hdr["VoxelSize"].tolist(), [1, 1, 1])
         self.assertEqual(hdr["NIIExtender"].tolist(), [0, 0, 0, 0])
         self.assertEqual(hdr["Quatern"]["d"], 1)
-        self.assertEqual(
-            hdr["Affine"].tolist(), [[1, 0, 0, -89], [0, 1, 0, -125], [0, 0, 1, -71]]
-        )
+        self.assertEqual(hdr["Affine"].tolist(), [[1, 0, 0, -89], [0, 1, 0, -125], [0, 0, 1, -71]])
 
     def test_nifticreate_nifti1(self):
         nii = nifticreate(np.ones((4, 5, 6), dtype=np.float32))

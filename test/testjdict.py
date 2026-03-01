@@ -13,7 +13,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from jdata.jdict import jdict
+from jdata.jdictionary import jdict
 from jdata.jschema import jsonschema
 
 
@@ -225,9 +225,7 @@ class TestJdictDims(unittest.TestCase):
         np.testing.assert_array_equal(result, expected)
 
     def test_sibling_dims(self):
-        jd = jdict(
-            {"exp1": np.arange(6).reshape(2, 3), "exp2": np.arange(8).reshape(2, 4)}
-        )
+        jd = jdict({"exp1": np.arange(6).reshape(2, 3), "exp2": np.arange(8).reshape(2, 4)})
         jd.exp1.setattr("dims", ["t", "s"])
         jd.exp2.setattr("dims", ["x", "y"])
         result1 = jd.exp1.t(1)()
@@ -308,9 +306,7 @@ class TestJdictCoords(unittest.TestCase):
         result_str = jd.data.row("r2")()
         result_num = jd.data.col(3)()
         np.testing.assert_array_equal(result_str, [4, 5, 6, 7])
-        np.testing.assert_array_equal(
-            result_num, [2, 6, 10]
-        )  # NumPy drops singleton dim
+        np.testing.assert_array_equal(result_num, [2, 6, 10])  # NumPy drops singleton dim
 
     def test_third_level_coords(self):
         jd = jdict({"level1": {"level2": {"arr": np.arange(6).reshape(2, 3)}}})
@@ -322,9 +318,7 @@ class TestJdictCoords(unittest.TestCase):
         np.testing.assert_array_equal(result_j, [1, 4])  # NumPy drops singleton dim
 
     def test_sibling_coords(self):
-        jd = jdict(
-            {"exp1": np.arange(6).reshape(2, 3), "exp2": np.arange(8).reshape(2, 4)}
-        )
+        jd = jdict({"exp1": np.arange(6).reshape(2, 3), "exp2": np.arange(8).reshape(2, 4)})
         jd.exp1.setattr("dims", ["t", "s"])
         jd.exp1.setattr("coords", {"t": ["t1", "t2"], "s": ["s1", "s2", "s3"]})
         jd.exp2.setattr("dims", ["x", "y"])
@@ -337,9 +331,7 @@ class TestJdictCoords(unittest.TestCase):
     def test_3d_coords(self):
         jd = jdict(np.arange(24).reshape(2, 3, 4))
         jd.setattr("dims", ["x", "y", "z"])
-        jd.setattr(
-            "coords", {"x": ["a", "b"], "y": [10, 20, 30], "z": ["p", "q", "r", "s"]}
-        )
+        jd.setattr("coords", {"x": ["a", "b"], "y": [10, 20, 30], "z": ["p", "q", "r", "s"]})
         result_x = jd.x("b")()
         result_y = jd.y(20)()
         result_z = jd.z("r")()
@@ -414,27 +406,21 @@ class TestJdictCoordsCascade(unittest.TestCase):
     def test_cascade_in_nested_struct(self):
         jd = jdict({"data": np.arange(12).reshape(3, 4)})
         jd.data.setattr("dims", ["row", "col"])
-        jd.data.setattr(
-            "coords", {"row": ["r1", "r2", "r3"], "col": ["c1", "c2", "c3", "c4"]}
-        )
+        jd.data.setattr("coords", {"row": ["r1", "r2", "r3"], "col": ["c1", "c2", "c3", "c4"]})
         result = jd.data.row("r2").col("c3")()
         self.assertEqual(result, 6)
 
     def test_cascade_3d_two_dims(self):
         jd = jdict(np.arange(24).reshape(2, 3, 4))
         jd.setattr("dims", ["x", "y", "z"])
-        jd.setattr(
-            "coords", {"x": ["a", "b"], "y": ["p", "q", "r"], "z": ["i", "j", "k", "l"]}
-        )
+        jd.setattr("coords", {"x": ["a", "b"], "y": ["p", "q", "r"], "z": ["i", "j", "k", "l"]})
         result = jd.x("b").z("k")()
         np.testing.assert_array_equal(result, [14, 18, 22])
 
     def test_cascade_3d_all_three_dims(self):
         jd = jdict(np.arange(24).reshape(2, 3, 4))
         jd.setattr("dims", ["x", "y", "z"])
-        jd.setattr(
-            "coords", {"x": ["a", "b"], "y": ["p", "q", "r"], "z": ["i", "j", "k", "l"]}
-        )
+        jd.setattr("coords", {"x": ["a", "b"], "y": ["p", "q", "r"], "z": ["i", "j", "k", "l"]})
         result = jd.x("a").y("q").z("j")()
         self.assertEqual(result, 5)
 
@@ -875,9 +861,7 @@ class TestSchemaValidatedAssignment(unittest.TestCase):
 
     def test_le_subkey_fail(self):
         jd = jdict({"name": "John", "age": 30})
-        jd.setschema(
-            {"type": "object", "properties": {"age": {"type": "integer", "minimum": 0}}}
-        )
+        jd.setschema({"type": "object", "properties": {"age": {"type": "integer", "minimum": 0}}})
         with self.assertRaises(ValueError):
             jd.age <= -10
 

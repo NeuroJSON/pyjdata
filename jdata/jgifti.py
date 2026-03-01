@@ -106,9 +106,7 @@ def _parse_metadata(elem: ET.Element) -> Dict[str, str]:
     for md in elem.findall("MD"):
         name_el, val_el = md.find("Name"), md.find("Value")
         if name_el is not None and name_el.text:
-            result[name_el.text.strip()] = (
-                (val_el.text or "").strip() if val_el is not None else ""
-            )
+            result[name_el.text.strip()] = (val_el.text or "").strip() if val_el is not None else ""
     return result
 
 
@@ -160,9 +158,7 @@ def _parse_coord_system(elem: ET.Element) -> Dict:
 def _decode_gifti_data(elem: ET.Element, attribs: Dict) -> Union[np.ndarray, Dict]:
     """Decode GIFTI Data element (from XML)."""
     encoding = attribs.get("Encoding", "ASCII")
-    dtype_str = _DATATYPE_MAP.get(
-        attribs.get("DataType", "NIFTI_TYPE_FLOAT32"), "float32"
-    )
+    dtype_str = _DATATYPE_MAP.get(attribs.get("DataType", "NIFTI_TYPE_FLOAT32"), "float32")
     endian = "<" if attribs.get("Endian", "LittleEndian") == "LittleEndian" else ">"
     dtype = np.dtype(dtype_str).newbyteorder(endian)
 
@@ -328,9 +324,7 @@ def get_properties(jgii: Dict, anatomy: str = None, opt: Dict = None) -> Optiona
     if not container:
         return None
     try:
-        return _decode_properties(
-            container["MeshVertex3"]["Properties"], opt, root=jgii
-        )
+        return _decode_properties(container["MeshVertex3"]["Properties"], opt, root=jgii)
     except KeyError:
         return None
 
@@ -340,9 +334,7 @@ def get_labels(jgii: Dict) -> Optional[Dict]:
     return jgii.get("GIFTIHeader", {}).get("LabelTable")
 
 
-def get_metadata(
-    jgii: Dict, level: str = "file", anatomy: str = None
-) -> Optional[Dict]:
+def get_metadata(jgii: Dict, level: str = "file", anatomy: str = None) -> Optional[Dict]:
     """Get metadata ('file' or 'node' level)."""
     if level == "file":
         return jgii.get("GIFTIHeader", {}).get("MetaData")
@@ -402,8 +394,7 @@ def gii2jgii(filename: str, **kwargs) -> Dict:
         coord_systems = [
             cs
             for cs in (
-                _parse_coord_system(c)
-                for c in da.findall("CoordinateSystemTransformMatrix")
+                _parse_coord_system(c) for c in da.findall("CoordinateSystemTransformMatrix")
             )
             if cs
         ]
@@ -542,9 +533,7 @@ def jgii2gii(jgii: Dict, filename: Optional[str] = None, **kwargs) -> bytes:
         elif encoding == "Base64Binary":
             data_elem.text = base64.b64encode(flat.tobytes()).decode("ascii")
         else:
-            data_elem.text = base64.b64encode(zlib.compress(flat.tobytes())).decode(
-                "ascii"
-            )
+            data_elem.text = base64.b64encode(zlib.compress(flat.tobytes())).decode("ascii")
 
     if "MeshVertex3" in gifti_data:
         mv = gifti_data["MeshVertex3"]
@@ -577,9 +566,7 @@ def jgii2gii(jgii: Dict, filename: Optional[str] = None, **kwargs) -> bytes:
             data = np.asarray(data, dtype=np.int32) - 1
             add_data_array(data, "NIFTI_INTENT_TRIANGLE", mt.get("_DataInfo_"))
 
-    xml_bytes = b'<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(
-        root, encoding="utf-8"
-    )
+    xml_bytes = b'<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding="utf-8")
 
     if filename:
         if filename.endswith(".gz"):
@@ -867,9 +854,7 @@ class JGifti:
         anat = self._resolve_anatomy(anatomy)
         return get_node(self._data, anat, opt=self._opt)
 
-    def face(
-        self, anatomy: str = None, zero_based: bool = True
-    ) -> Optional[np.ndarray]:
+    def face(self, anatomy: str = None, zero_based: bool = True) -> Optional[np.ndarray]:
         """
         Get triangle faces (Mx3).
 
@@ -1144,9 +1129,7 @@ class JGifti:
         anat = self._resolve_anatomy(anatomy) if level == "node" else None
         return get_metadata(self._data, level, anat)
 
-    def set_metadata(
-        self, key: str, value: str, level: str = "file", anatomy: str = None
-    ):
+    def set_metadata(self, key: str, value: str, level: str = "file", anatomy: str = None):
         """
         Set a metadata value.
 
@@ -1269,9 +1252,7 @@ class JGifti:
                 container = gifti_data
 
         if "MeshTri3" not in container:
-            container["MeshTri3"] = {
-                "_DataInfo_": {"MetaData": {"TopologicalType": "Closed"}}
-            }
+            container["MeshTri3"] = {"_DataInfo_": {"MetaData": {"TopologicalType": "Closed"}}}
         container["MeshTri3"]["Data"] = face
 
     def add_surface(
@@ -1304,9 +1285,7 @@ class JGifti:
         gifti_data = self._data["GIFTIData"]
 
         if "MeshVertex3" in gifti_data or "MeshTri3" in gifti_data:
-            existing = {
-                k: v for k, v in gifti_data.items() if k in ("MeshVertex3", "MeshTri3")
-            }
+            existing = {k: v for k, v in gifti_data.items() if k in ("MeshVertex3", "MeshTri3")}
             for k in existing:
                 del gifti_data[k]
             gifti_data["default"] = existing
@@ -1337,9 +1316,7 @@ class JGifti:
         elif share_topology_with:
             surface["MeshTri3"] = {
                 "_DataInfo_": {},
-                "Data": {
-                    "_DataLink_": f"$.GIFTIData.{share_topology_with}.MeshTri3.Data"
-                },
+                "Data": {"_DataLink_": f"$.GIFTIData.{share_topology_with}.MeshTri3.Data"},
             }
 
         gifti_data[anatomy] = surface
@@ -1399,9 +1376,7 @@ class JGifti:
 
         cs = self.coord_system()
         if cs:
-            lines.append(
-                f"  Coord System: {cs.get('DataSpace')} -> {cs.get('TransformedSpace')}"
-            )
+            lines.append(f"  Coord System: {cs.get('DataSpace')} -> {cs.get('TransformedSpace')}")
 
         meta = self.metadata
         if meta:

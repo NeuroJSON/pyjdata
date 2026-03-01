@@ -200,9 +200,7 @@ class TestMultiSurface(unittest.TestCase):
                 "P001_L_pial": {
                     "MeshVertex3": {
                         "_DataInfo_": {"MetaData": {}},
-                        "Data": np.array(
-                            [[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float32
-                        ),
+                        "Data": np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float32),
                         "Properties": {"Thickness": np.array([2.5, 2.3, 2.8])},
                     },
                     "MeshTri3": {
@@ -213,9 +211,7 @@ class TestMultiSurface(unittest.TestCase):
                 "P001_L_white": {
                     "MeshVertex3": {
                         "_DataInfo_": {"MetaData": {}},
-                        "Data": np.array(
-                            [[0, 0, -1], [1, 0, -1], [0, 1, -1]], dtype=np.float32
-                        ),
+                        "Data": np.array([[0, 0, -1], [1, 0, -1], [0, 1, -1]], dtype=np.float32),
                         "Properties": {},
                     },
                     "MeshTri3": {
@@ -685,9 +681,7 @@ class TestJGiftiClass(unittest.TestCase):
         gii.add_surface("P001_L_pial", node=pial_nodes, face=faces)
 
         white_nodes = np.random.randn(5, 3).astype(np.float32)
-        gii.add_surface(
-            "P001_L_white", node=white_nodes, share_topology_with="P001_L_pial"
-        )
+        gii.add_surface("P001_L_white", node=white_nodes, share_topology_with="P001_L_pial")
 
         self.assertTrue(gii.is_multi_surface)
         self.assertEqual(len(gii.surfaces), 2)

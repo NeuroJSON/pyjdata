@@ -46,7 +46,8 @@ import numpy as np
 from .jdata import encode, decode, jsonfilter
 from .h5 import loadh5, saveh5, snirfdecode, soa2aos
 from .jnifti import loadnifti, loadjnifti, savenifti
-from .csv import load_csv_tsv, save_csv_tsv
+from .csvtsv import load_csv_tsv, save_csv_tsv
+from .jgifti import loadgifti, savegifti
 import urllib.request
 from hashlib import sha256
 from sys import platform
@@ -82,12 +83,14 @@ jext = {
 ##====================================================================================
 
 
-def load(fname, opt={}, **kwargs):
+def load(fname, opt=None, **kwargs):
     """@brief Loading a JData file (binary or text) according to the file extension
 
     @param[in] fname: a JData file name (accept .json,.jdat,.jbat,.jnii,.bnii,.jmsh,.bmsh)
     @param[in] opt: options, if opt['decode']=True or 1 (default), call jdata.decode() after loading
     """
+    if opt is None:
+        opt = {}
     if re.match("^https*://", fname):
         newdata, fname, _ = downloadlink(fname, opt, **kwargs)
         if newdata:
@@ -117,13 +120,15 @@ def load(fname, opt={}, **kwargs):
         )
 
 
-def save(data, fname, opt={}, **kwargs):
+def save(data, fname, opt=None, **kwargs):
     """@brief Saving Python data to file (binary or text) according to the file extension
 
     @param[in] data: data to be saved
     @param[in] fname: a JData file name
     @param[in] opt: options, if opt['encode']=True or 1 (default), call jdata.encode() before saving
     """
+    if opt is None:
+        opt = {}
     spl = os.path.splitext(fname)
     ext = spl[1].lower()
 
@@ -153,12 +158,14 @@ def save(data, fname, opt={}, **kwargs):
         )
 
 
-def loadurl(url, opt={}, **kwargs):
+def loadurl(url, opt=None, **kwargs):
     """@brief Loading a JData file (binary or text) from a URL without caching locally
 
     @param[in] url: a REST API URL, curently only support http:// and https://
     @param[in] opt: options, opt['nocache']=True by default, setting to False download and locally cache the data
     """
+    if opt is None:
+        opt = {}
     kwargs.setdefault("nocache", True)
     kwargs.update(opt)
 
@@ -177,12 +184,14 @@ def loadurl(url, opt={}, **kwargs):
 ##====================================================================================
 
 
-def loadt(fname, opt={}, **kwargs):
+def loadt(fname, opt=None, **kwargs):
     """@brief Loading a text-based (JSON) JData file and decode it to native Python data
 
     @param[in] fname: a text JData (JSON based) file name
     @param[in] opt: options, if opt['decode']=True or 1 (default), call jdata.decode() after loading
     """
+    if opt is None:
+        opt = {}
     kwargs.setdefault("strict", False)
     kwargs.setdefault("object_pairs_hook", OrderedDict)
     kwargs.setdefault("decode", True)
@@ -210,13 +219,15 @@ def loadt(fname, opt={}, **kwargs):
     return data
 
 
-def savet(data, fname, opt={}, **kwargs):
+def savet(data, fname, opt=None, **kwargs):
     """@brief Saving a Python data structure to a text-based JData (JSON) file
 
     @param[in] data: data to be saved
     @param[in] fname: a text JData (JSON based) file name
     @param[in] opt: options, if opt['encode']=True or 1 (default), call jdata.encode() before saving
     """
+    if opt is None:
+        opt = {}
     kwargs.setdefault("default", jsonfilter)
     kwargs.setdefault("encode", True)
     kwargs.setdefault("inplace", True)
@@ -248,12 +259,14 @@ def savet(data, fname, opt={}, **kwargs):
 ##====================================================================================
 
 
-def loadts(bytes, opt={}, **kwargs):
+def loadts(buf, opt=None, **kwargs):
     """@brief Loading a text-based (JSON) JData string buffer and decode it to native Python data
 
-    @param[in] bytes: a JSON string or byte-stream
+    @param[in] buf: a JSON string or byte-stream
     @param[in] opt: options, if opt['decode']=True or 1 (default), call jdata.decode() after loading
     """
+    if opt is None:
+        opt = {}
     kwargs.setdefault("strict", False)
     kwargs.setdefault("object_pairs_hook", OrderedDict)
     kwargs.setdefault("decode", True)
@@ -273,19 +286,21 @@ def loadts(bytes, opt={}, **kwargs):
         if k in kwargs
     }
 
-    data = json.loads(bytes, **jsonkwargs)
+    data = json.loads(buf, **jsonkwargs)
 
     if kwargs["decode"]:
         data = decode(data, **kwargs)
     return data
 
 
-def loadbs(bytes, opt={}, **kwargs):
+def loadbs(buf, opt=None, **kwargs):
     """@brief Loading a binary-JSON/BJData string buffer and decode it to native Python data
 
-    @param[in] bytes: a BJData byte-buffer or byte-stream
+    @param[in] buf: a BJData byte-buffer or byte-stream
     @param[in] opt: options, if opt['decode']=True or 1 (default), call jdata.decode() after loading
     """
+    if opt is None:
+        opt = {}
     kwargs.setdefault("decode", True)
     kwargs.setdefault("inplace", True)
     kwargs["base64"] = False
@@ -311,19 +326,21 @@ def loadbs(bytes, opt={}, **kwargs):
             'To read/write binary JData files, you must install the bjdata module by "pip install bjdata"'
         )
     else:
-        data = bjdata.loadb(bytes, **bjdkwargs)
+        data = bjdata.loadb(buf, **bjdkwargs)
         if kwargs["decode"]:
             data = decode(data, **kwargs)
         return data
 
 
-def show(data, opt={}, **kwargs):
+def show(data, opt=None, **kwargs):
     """@brief Printing a python data as JSON string or return the JSON string (opt['string']=True)
 
     @param[in] data: data to be saved
     @param[in] opt: options, if opt['encode']=True or 1 (default), call jdata.encode() before printing
     """
 
+    if opt is None:
+        opt = {}
     kwargs.setdefault("default", jsonfilter)
     kwargs.setdefault("string", False)
     kwargs.setdefault("encode", True)
@@ -355,12 +372,14 @@ def show(data, opt={}, **kwargs):
         print(str)
 
 
-def dumpb(data, opt={}, **kwargs):
+def dumpb(data, opt=None, **kwargs):
     """@brief Printing native python data in binary JSON stream
 
     @param[in] data: data to be saved
     @param[in] opt: options, if opt['encode']=True or 1 (default), call jdata.encode() before printing
     """
+    if opt is None:
+        opt = {}
     kwargs.update(opt)
 
     try:
@@ -378,12 +397,14 @@ def dumpb(data, opt={}, **kwargs):
 ##====================================================================================
 
 
-def loadb(fname, opt={}, **kwargs):
+def loadb(fname, opt=None, **kwargs):
     """@brief Loading a binary (BJData/UBJSON) JData file and decode it to native Python data
 
     @param[in] fname: a binary (BJData/UBJSON based) JData file name
     @param[in] opt: options, if opt['decode']=True or 1 (default), call jdata.decode() before saving
     """
+    if opt is None:
+        opt = {}
     kwargs.setdefault("decode", True)
     kwargs.setdefault("inplace", True)
     kwargs["base64"] = False
@@ -415,16 +436,16 @@ def loadb(fname, opt={}, **kwargs):
             data = decode(data, **kwargs)
         return data
 
-    return None
 
-
-def saveb(data, fname, opt={}, **kwargs):
+def saveb(data, fname, opt=None, **kwargs):
     """@brief Saving a Python data structure to a binary JData (BJData/UBJSON) file
 
     @param[in] data: data to be saved
     @param[in] fname: a binary (BJData/UBJSON based) JData file name
     @param[in] opt: options, if opt['encode']=True or 1 (default), call jdata.encode() before saving
     """
+    if opt is None:
+        opt = {}
     kwargs.setdefault("encode", True)
     kwargs.setdefault("inplace", True)
     kwargs["base64"] = False
@@ -460,13 +481,15 @@ def saveb(data, fname, opt={}, **kwargs):
 ##====================================================================================
 
 
-def jsoncache(url, opt={}, **kwargs):
+def jsoncache(url, opt=None, **kwargs):
     """@brief Printing the local folder and file name where a linked data file in the URL to be saved
 
     @param[in] url: a URL
     @param[in] opt: options, if opt['decode']=True or 1 (default), call jdata.decode() before saving
     """
 
+    if opt is None:
+        opt = {}
     pathname = os.getenv("HOME")
     cachepath = [os.path.join(os.getcwd(), ".neurojson")]
     dbname, docname, filename = None, None, None
@@ -483,9 +506,9 @@ def jsoncache(url, opt={}, **kwargs):
         cachepath.append(os.path.join(pathname, ".cache/neurojson"))
         cachepath.append("/var/cache/neurojson")
 
-    if (
-        isinstance(url, list) or isinstance(url, tuple) or isinstance(url, frozenset)
-    ) and len(url) < 4:
+    if (isinstance(url, list) or isinstance(url, tuple) or isinstance(url, frozenset)) and len(
+        url
+    ) < 4:
         domain = "default"
 
     if isinstance(url, str):
@@ -572,7 +595,7 @@ def jsoncache(url, opt={}, **kwargs):
         return cachepath, filename
 
 
-def jdlink(uripath, opt={}, **kwargs):
+def jdlink(uripath, opt=None, **kwargs):
     """@brief Printing the local folder and file name where a linked data file in the URL to be saved
 
     newdata, fname, cachepath = jdlink(uripath, showlink=True, showsize=True, regex=None, nocache=False, **kwargs)
@@ -586,6 +609,8 @@ def jdlink(uripath, opt={}, **kwargs):
     nocache: redownload and ignore the cached files
     """
 
+    if opt is None:
+        opt = {}
     kwargs.setdefault("showlink", 1)
     kwargs.setdefault("showsize", 1)
     kwargs.update(opt)
@@ -605,7 +630,7 @@ def jdlink(uripath, opt={}, **kwargs):
                 else:
                     nosize += 1
             print(
-                "total {} links, {} bytes, {} files with unknown size".format(
+                "total {} links, {} buf, {} files with unknown size".format(
                     len(uripath), totalsize, nosize
                 )
             )
@@ -623,7 +648,7 @@ def jdlink(uripath, opt={}, **kwargs):
     return newdata, fname
 
 
-def downloadlink(uripath, opt={}, **kwargs):
+def downloadlink(uripath, opt=None, **kwargs):
     """
     newdata, fname, cachepath = downloadlink(urlpath, showlink=True, nocache=False, **kwargs)
 
@@ -632,6 +657,8 @@ def downloadlink(uripath, opt={}, **kwargs):
     @param[in] nocache: when True, redownload the data instead of using locally cached files
     kwargs: additional parameters passing to loadjd()
     """
+    if opt is None:
+        opt = {}
     kwargs.setdefault("showlink", 1)
     kwargs.update(opt)
 
@@ -639,10 +666,10 @@ def downloadlink(uripath, opt={}, **kwargs):
         newdata = urllib.request.urlopen(uripath).read()
         try:
             newdata = loadts(newdata, **kwargs)
-        except:
+        except Exception:
             try:
                 newdata = loadbs(newdata, **kwargs)
-            except:
+            except Exception:
                 pass
         return newdata, uripath, None
 
@@ -661,7 +688,7 @@ def downloadlink(uripath, opt={}, **kwargs):
             fid.write(rawdata)
         spl = os.path.splitext(fname)
         ext = spl[1].lower()
-        if kwargs.get("downloadonly", False) and ext in jext["t"] or ext in jext["b"]:
+        if (not kwargs.get("downloadonly", False)) and ext in jext["t"] or ext in jext["b"]:
             newdata = loadjd(fname, **kwargs)
 
     elif not isinstance(cachepath, list) and os.path.exists(cachepath):
@@ -670,7 +697,7 @@ def downloadlink(uripath, opt={}, **kwargs):
         fname = cachepath
         spl = os.path.splitext(fname)
         ext = spl[1].lower()
-        if kwargs.get("downloadonly", False) and ext in jext["t"] or ext in jext["b"]:
+        if (not kwargs.get("downloadonly", False)) and ext in jext["t"] or ext in jext["b"]:
             newdata = loadjd(fname, **kwargs)
     return newdata, fname, cachepath
 
@@ -747,9 +774,7 @@ def loadmat(filename, **kwargs):
     for key, value in data.items():
         if isinstance(value, np.ndarray):
             # Handle 1-based indices: if array contains integers that could be indices (elem/face)
-            if key.lower() in ["elem", "face"] and np.issubdtype(
-                value.dtype, np.integer
-            ):
+            if key.lower() in ["elem", "face"] and np.issubdtype(value.dtype, np.integer):
                 # Convert 1-based indices to 0-based for Python usage
                 data[key] = value - 1
             else:
@@ -953,9 +978,7 @@ def loadjsnirf(filename: str, **kwargs) -> Dict:
         raise ValueError("you must provide data and output file name")
 
     # Check file extension and load accordingly
-    if re.search(r"\.[Ss][Nn][Ii][Rr][Ff]$", filename) or re.search(
-        r"\.[Hh]5$", filename
-    ):
+    if re.search(r"\.[Ss][Nn][Ii][Rr][Ff]$", filename) or re.search(r"\.[Hh]5$", filename):
         jnirs = loadsnirf(filename, **kwargs)
     elif re.search(r"\.[Jj][Nn][Ii][Rr][Ss]$", filename):
         jnirs = load(filename, **kwargs)
@@ -1054,14 +1077,10 @@ def savejsnirf(jnirs: Dict, filename: str, **kwargs):
         save(jnirs, filename, **kwargs)
     elif re.search(r"\.[Bb][Nn][Ii][Rr][Ss]$", filename):
         save(jnirs, filename, **kwargs)
-    elif re.search(r"\.[Ss][Nn][Ii][Rr][Ff]$", filename) or re.search(
-        r"\.[Hh]5$", filename
-    ):
+    elif re.search(r"\.[Ss][Nn][Ii][Rr][Ff]$", filename) or re.search(r"\.[Hh]5$", filename):
         save(jnirs, filename, **kwargs)
     else:
-        raise ValueError(
-            "file suffix must be .jnirs for text JSNIRF or .bnirs for binary JSNIRF"
-        )
+        raise ValueError("file suffix must be .jnirs for text JSNIRF or .bnirs for binary JSNIRF")
 
 
 def savesnirf(data: Dict, outfile: str, **kwargs):

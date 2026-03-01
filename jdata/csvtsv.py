@@ -211,9 +211,7 @@ def group_column(column: List[str]) -> List[Any]:
     converted = [tonumbers(value) for value in column]
 
     # Check if all non-NaN values are numeric
-    numeric_count = sum(
-        1 for x in converted if isinstance(x, (int, float)) and not np.isnan(x)
-    )
+    numeric_count = sum(1 for x in converted if isinstance(x, (int, float)) and not np.isnan(x))
     nan_count = sum(1 for x in converted if isinstance(x, float) and np.isnan(x))
     total_numeric = numeric_count + nan_count
 
@@ -417,9 +415,7 @@ def encode_enum_column(values: List[Any], compress: bool = True) -> Union[List, 
             ]
         )
 
-    return OrderedDict(
-        [("_EnumKey_", list(enum_map.keys())), ("_EnumValue_", enum_value)]
-    )
+    return OrderedDict([("_EnumKey_", list(enum_map.keys())), ("_EnumValue_", enum_value)])
 
 
 def decode_enum_column(data: Dict) -> List[Any]:
@@ -474,9 +470,7 @@ def decode_enum_column(data: Dict) -> List[Any]:
         raise ValueError("_EnumValue_ must contain _ArrayZipData_ or _ArrayData_")
 
     # Map indices back to values (indices are 1-based)
-    result = [
-        enum_keys[idx - 1] if 0 < idx <= len(enum_keys) else None for idx in indices
-    ]
+    result = [enum_keys[idx - 1] if 0 < idx <= len(enum_keys) else None for idx in indices]
 
     return result
 
@@ -530,9 +524,7 @@ def tsv2json(
     for col_name, col_values in data.items():
         # Skip encoding for certain columns
         should_skip = col_name in skip_columns
-        if is_participants and any(
-            x in col_name.lower() for x in ["age", "sex", "gender"]
-        ):
+        if is_participants and any(x in col_name.lower() for x in ["age", "sex", "gender"]):
             should_skip = True
 
         if should_skip:
@@ -669,9 +661,7 @@ def save_csv_tsv_with_enum(
 
         for col_name, col_values in data.items():
             should_skip = col_name in skip_columns
-            if is_participants and any(
-                x in col_name.lower() for x in ["age", "sex", "gender"]
-            ):
+            if is_participants and any(x in col_name.lower() for x in ["age", "sex", "gender"]):
                 should_skip = True
 
             if should_skip or not compress_enum:

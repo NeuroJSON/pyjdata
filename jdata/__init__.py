@@ -35,224 +35,57 @@ to restore the original data types
 Copyright (c) 2019-2026 Qianqian Fang <q.fang at neu.edu>
 """
 
-from .jfile import (
-    loadjson,
-    savejson,
-    loadbj,
-    savebj,
-    loadjd,
-    savejd,
-    load,
-    save,
-    loadurl,
-    show,
-    dumpb,
-    loadt,
-    savet,
-    loadts,
-    loadbs,
-    loadb,
-    saveb,
-    jsoncache,
-    jdlink,
-    jext,
-    loadjsnirf,
-    loadsnirf,
-    savejsnirf,
-    savesnirf,
-    loadmsgpack,
-    savemsgpack,
-    loadubjson,
-    saveubjson,
-)
-from .jdata import (
-    jdataencode,
-    jdatadecode,
-    encode,
-    decode,
-    jdtype,
-    jsonfilter,
-    zlibencode,
-    zlibdecode,
-    gzipencode,
-    gzipdecode,
-    lzmaencode,
-    lzmadecode,
-    lz4encode,
-    lz4decode,
-    base64encode,
-    base64decode,
-)
-from .jpath import jsonpath
+from . import jdata
+from . import jfile
+from . import jdictionary
+from . import csvtsv
+from . import h5
+from . import jnifti
+from . import jgifti
+from . import jpath
+from . import jschema
+from . import njprep
+from . import neurojson
 
-from .jgifti import (
-    JGifti,
-    gii2jgii,
-    jgii2gii,
-    loadgifti,
-    loadjgifti,
-    savegifti,
-    savejgifti,
-    jgifticreate,
-    giicodemap,
-    get_node,
-    get_face,
-    get_property,
-    get_properties,
-    get_labels,
-    get_metadata,
-    get_coord_system,
-    get_surfaces,
+# Re-export all public functions from submodules
+from .jdata import *
+from .jfile import *
+from .jdictionary import *
+from .csvtsv import *
+from .h5 import *
+from .jnifti import *
+from .jgifti import *
+from .jpath import *
+from .jschema import *
+from .njprep import *
+from .neurojson import *
+
+__version__ = "0.9.4"
+__all__ = (
+    jdata.__all__
+    + jfile.__all__
+    + jdictionary.__all__
+    + csvtsv.__all__
+    + h5.__all__
+    + jnifti.__all__
+    + jgifti.__all__
+    + jpath.__all__
+    + jschema.__all__
+    + njprep.__all__
+    + neurojson.__all__
+    + [
+        "jdata",
+        "jfile",
+        "jdictionary",
+        "csvtsv",
+        "h5",
+        "jnifti",
+        "jgifti",
+        "jpath",
+        "jschema",
+        "neurojson",
+        "njprep",
+    ]
 )
-
-from .jnifti import (
-    nii2jnii,
-    jnii2nii,
-    loadnifti,
-    loadjnifti,
-    savenifti,
-    savejnifti,
-    nifticreate,
-    jnifticreate,
-    memmapstream,
-    niiheader2jnii,
-    niicodemap,
-    niiformat,
-    savejnii,
-    savebnii,
-)
-
-from .h5 import (
-    loadh5,
-    saveh5,
-    regrouph5,
-    aos2soa,
-    soa2aos,
-    jsnirfcreate,
-    snirfcreate,
-    snirfdecode,
-)
-
-from .csv import (
-    load_csv_tsv,
-    loadcsv,
-    loadtsv,
-    save_csv_tsv,
-    encode_enum_column,
-    decode_enum_column,
-    is_enum_encoded,
-    tsv2json,
-    json2tsv,
-    save_csv_tsv_with_enum,
-)
-
-from .jdict import jdict
-from .jschema import jsonschema
-from .neurojson import neuroj, neurojgui
-from .njprep import dataset2json, NJPREP_DEFAULT
-
-__version__ = "0.9.3"
-__all__ = [
-    "loadjson",
-    "savejson",
-    "loadbj",
-    "savebj",
-    "loadjd",
-    "savejd",
-    "jdataencode",
-    "jdatadecode",
-    "load",
-    "save",
-    "loadurl",
-    "show",
-    "dumpb",
-    "loadt",
-    "savet",
-    "loadts",
-    "loadbs",
-    "loadb",
-    "saveb",
-    "encode",
-    "decode",
-    "jsoncache",
-    "jdlink",
-    "jdtype",
-    "jsonfilter",
-    "jext",
-    "jsonpath",
-    "nii2jnii",
-    "jnii2nii",
-    "loadnifti",
-    "loadjnifti",
-    "savenifti",
-    "savejnifti",
-    "nifticreate",
-    "jnifticreate",
-    "memmapstream",
-    "niiheader2jnii",
-    "niicodemap",
-    "niiformat",
-    "savebnii",
-    "savejnii",
-    "loadh5",
-    "saveh5",
-    "regrouph5",
-    "aos2soa",
-    "soa2aos",
-    "jsnirfcreate",
-    "snirfcreate",
-    "loadjsnirf",
-    "loadsnirf",
-    "savejsnirf",
-    "savesnirf",
-    "snirfdecode",
-    "zlibencode",
-    "zlibdecode",
-    "gzipencode",
-    "gzipdecode",
-    "lzmaencode",
-    "lzmadecode",
-    "lz4encode",
-    "lz4decode",
-    "base64encode",
-    "base64decode",
-    "neuroj",
-    "neurojgui",
-    "load_csv_tsv",
-    "loadcsv",
-    "loadtsv",
-    "save_csv_tsv",
-    "loadmsgpack",
-    "savemsgpack",
-    "loadubjson",
-    "saveubjson",
-    "jdict",
-    "jsonschema",
-    "dataset2json",
-    "NJPREP_DEFAULT",
-    "encode_enum_column",
-    "decode_enum_column",
-    "is_enum_encoded",
-    "tsv2json",
-    "json2tsv",
-    "save_csv_tsv_with_enum",
-    "JGifti",
-    "gii2jgii",
-    "jgii2gii",
-    "loadgifti",
-    "loadjgifti",
-    "savegifti",
-    "savejgifti",
-    "jgifticreate",
-    "giicodemap",
-    "get_node",
-    "get_face",
-    "get_property",
-    "get_properties",
-    "get_labels",
-    "get_metadata",
-    "get_coord_system",
-    "get_surfaces",
-]
 
 __license__ = """Apache license 2.0, Copyright (c) 2019-2026 Qianqian Fang"""

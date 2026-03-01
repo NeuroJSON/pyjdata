@@ -25,6 +25,7 @@ import time
 from .jfile import jdlink
 from .jpath import jsonpath
 from .njprep import dataset2json
+import warnings
 
 
 def neuroj(
@@ -137,6 +138,7 @@ def neuroj(
 
     cmd = cmd.lower()
     restapi = serverurl
+    jsonstring = ""
 
     if cmd == "list":
         restapi = f"{serverurl}sys/registry"
@@ -165,7 +167,8 @@ def neuroj(
 
         if ds or file:
             res = _load_json_header(restapi, **kwargs)
-            jsonstring = json.dumps(res)
+            if kwargs.get("raw", False):
+                jsonstring = json.dumps(res)
         else:
             jsonstring = _load_json_raw(restapi, **kwargs)
             res = json.loads(jsonstring)
@@ -203,14 +206,14 @@ def neuroj(
                         # Try binary format or return raw content
                         f.seek(0)
                         res = f.read()
-
-        jsonstring = (
-            json.dumps(res)
-            if isinstance(res, (dict, list))
-            else str(res)
-            if res
-            else ""
-        )
+        if kwargs.get("raw", False):
+            if cachefile:
+                with open(cachefile, "r", encoding="utf-8") as f:
+                    jsonstring = f.read()
+            else:
+                jsonstring = (
+                    json.dumps(res) if isinstance(res, (dict, list)) else str(res) if res else ""
+                )
 
     elif cmd == "export":
         if not ds:
@@ -225,13 +228,11 @@ def neuroj(
 
                 root = tk.Tk()
                 root.withdraw()
-                exportroot = filedialog.askdirectory(
-                    title="Select folder to export dataset"
-                )
+                exportroot = filedialog.askdirectory(title="Select folder to export dataset")
                 root.destroy()
                 if not exportroot:
                     return None
-            except:
+            except Exception:
                 raise ValueError("exportpath must be specified")
 
         # Load the dataset
@@ -278,14 +279,10 @@ def neuroj(
                         break
 
             if not is_bids:
-                print(
-                    f"DEBUG: Not a BIDS dataset. Keys in data: {list(data.keys())[:10]}"
-                )
+                print(f"DEBUG: Not a BIDS dataset. Keys in data: {list(data.keys())[:10]}")
                 for k in data.keys():
                     if "dataset_description" in k.lower():
-                        print(
-                            f"DEBUG: Found key containing 'dataset_description': {k} = {data[k]}"
-                        )
+                        print(f"DEBUG: Found key containing 'dataset_description': {k} = {data[k]}")
 
         if is_bids:
             # Create dataset subfolder and perform folder reconstruction
@@ -353,9 +350,7 @@ def neuroj(
 
     elif cmd == "find":
         if not db:
-            raise ValueError(
-                "find requires at least a search regular expression pattern"
-            )
+            raise ValueError("find requires at least a search regular expression pattern")
 
         if isinstance(db, str) and db.startswith("/") and db.endswith("/"):
             # Find databases by regex
@@ -500,7 +495,7 @@ def _export_data(data, currentfolder, parentkey, rootdata, cachefile, exportroot
                     from .jfile import savesnirf
 
                     savesnirf(val["SNIRFData"], filepath)
-                except:
+                except Exception:
                     with open(filepath, "w") as f:
                         json.dump(val, f, indent=2)
 
@@ -611,9 +606,7 @@ def _resolve_internal(rootdata, jsonpath_str, destpath, exportroot=None):
                     os.symlink(rel_target, destpath)
                     return
                 except (ValueError, OSError) as e:
-                    print(
-                        f"Warning: Could not create symlink {destpath} -> {rel_target}: {e}"
-                    )
+                    print(f"Warning: Could not create symlink {destpath} -> {rel_target}: {e}")
                     pass  # Fall through to resolve data
 
         # Fallback: resolve and save actual data using jsonpath
@@ -622,7 +615,7 @@ def _resolve_internal(rootdata, jsonpath_str, destpath, exportroot=None):
         resolved = jsonpath(rootdata, jsonpath_str)
 
         if resolved is None:
-            print(f"Warning: Could not resolve jsonpath: {jsonpath_str}")
+            warnings.warn(f"Warning: Could not resolve jsonpath: {jsonpath_str}")
             return
 
         _, ext = os.path.splitext(destpath)
@@ -642,7 +635,7 @@ def _resolve_internal(rootdata, jsonpath_str, destpath, exportroot=None):
             with open(destpath, "w") as f:
                 json.dump(resolved, f, indent=2)
     except Exception as e:
-        print(f"Warning: Could not resolve internal link: {jsonpath_str} - {e}")
+        warnings.warn(f"Warning: Could not resolve internal link: {jsonpath_str} - {e}")
 
 
 def _save_struct_to_tsv(data, filepath):
@@ -768,23 +761,17 @@ class neurojgui:
         btn_export.pack(side=self.tk.LEFT, padx=5, pady=5)
 
         # Create search panel (initially hidden)
-        self.search_frame = self.tk.LabelFrame(
-            self.root, text="Dataset Search", padx=10, pady=10
-        )
+        self.search_frame = self.tk.LabelFrame(self.root, text="Dataset Search", padx=10, pady=10)
 
         # Search panel contents - Row 1
         row1 = self.tk.Frame(self.search_frame)
         row1.pack(fill=self.tk.X, pady=2)
 
-        self.tk.Label(row1, text="Keyword:", width=10, anchor="e").pack(
-            side=self.tk.LEFT
-        )
+        self.tk.Label(row1, text="Keyword:", width=10, anchor="e").pack(side=self.tk.LEFT)
         self.search_keyword = self.tk.Entry(row1, width=20)
         self.search_keyword.pack(side=self.tk.LEFT, padx=5)
 
-        self.tk.Label(row1, text="Database:", width=10, anchor="e").pack(
-            side=self.tk.LEFT
-        )
+        self.tk.Label(row1, text="Database:", width=10, anchor="e").pack(side=self.tk.LEFT)
         self.search_database = self.ttk.Combobox(
             row1,
             values=[
@@ -800,15 +787,11 @@ class neurojgui:
         self.search_database.set("any")
         self.search_database.pack(side=self.tk.LEFT, padx=5)
 
-        self.tk.Label(row1, text="Dataset:", width=10, anchor="e").pack(
-            side=self.tk.LEFT
-        )
+        self.tk.Label(row1, text="Dataset:", width=10, anchor="e").pack(side=self.tk.LEFT)
         self.search_dataset = self.tk.Entry(row1, width=15)
         self.search_dataset.pack(side=self.tk.LEFT, padx=5)
 
-        self.tk.Label(row1, text="Subject:", width=10, anchor="e").pack(
-            side=self.tk.LEFT
-        )
+        self.tk.Label(row1, text="Subject:", width=10, anchor="e").pack(side=self.tk.LEFT)
         self.search_subject = self.tk.Entry(row1, width=15)
         self.search_subject.pack(side=self.tk.LEFT, padx=5)
 
@@ -816,18 +799,14 @@ class neurojgui:
         row2 = self.tk.Frame(self.search_frame)
         row2.pack(fill=self.tk.X, pady=2)
 
-        self.tk.Label(row2, text="Gender:", width=10, anchor="e").pack(
-            side=self.tk.LEFT
-        )
+        self.tk.Label(row2, text="Gender:", width=10, anchor="e").pack(side=self.tk.LEFT)
         self.search_gender = self.ttk.Combobox(
             row2, values=["any", "male", "female", "unknown"], width=10
         )
         self.search_gender.set("any")
         self.search_gender.pack(side=self.tk.LEFT, padx=5)
 
-        self.tk.Label(row2, text="Modality:", width=10, anchor="e").pack(
-            side=self.tk.LEFT
-        )
+        self.tk.Label(row2, text="Modality:", width=10, anchor="e").pack(side=self.tk.LEFT)
         self.search_modality = self.ttk.Combobox(
             row2,
             values=[
@@ -851,15 +830,11 @@ class neurojgui:
         self.search_modality.set("any")
         self.search_modality.pack(side=self.tk.LEFT, padx=5)
 
-        self.tk.Label(row2, text="Age min:", width=10, anchor="e").pack(
-            side=self.tk.LEFT
-        )
+        self.tk.Label(row2, text="Age min:", width=10, anchor="e").pack(side=self.tk.LEFT)
         self.search_age_min = self.tk.Entry(row2, width=8)
         self.search_age_min.pack(side=self.tk.LEFT, padx=5)
 
-        self.tk.Label(row2, text="Age max:", width=10, anchor="e").pack(
-            side=self.tk.LEFT
-        )
+        self.tk.Label(row2, text="Age max:", width=10, anchor="e").pack(side=self.tk.LEFT)
         self.search_age_max = self.tk.Entry(row2, width=8)
         self.search_age_max.pack(side=self.tk.LEFT, padx=5)
 
@@ -867,15 +842,11 @@ class neurojgui:
         row3 = self.tk.Frame(self.search_frame)
         row3.pack(fill=self.tk.X, pady=2)
 
-        self.tk.Label(row3, text="Task name:", width=10, anchor="e").pack(
-            side=self.tk.LEFT
-        )
+        self.tk.Label(row3, text="Task name:", width=10, anchor="e").pack(side=self.tk.LEFT)
         self.search_task_name = self.tk.Entry(row3, width=15)
         self.search_task_name.pack(side=self.tk.LEFT, padx=5)
 
-        self.tk.Label(row3, text="Session:", width=10, anchor="e").pack(
-            side=self.tk.LEFT
-        )
+        self.tk.Label(row3, text="Session:", width=10, anchor="e").pack(side=self.tk.LEFT)
         self.search_session_name = self.tk.Entry(row3, width=15)
         self.search_session_name.pack(side=self.tk.LEFT, padx=5)
 
@@ -953,9 +924,7 @@ class neurojgui:
         self.tk.Label(value_frame, text="Value").pack()
         value_scroll = self.tk.Scrollbar(value_frame)
         value_scroll.pack(side=self.tk.RIGHT, fill=self.tk.Y)
-        self.txValue = self.tk.Text(
-            value_frame, width=40, yscrollcommand=value_scroll.set
-        )
+        self.txValue = self.tk.Text(value_frame, width=40, yscrollcommand=value_scroll.set)
         self.txValue.pack(fill=self.tk.BOTH, expand=True)
         value_scroll.config(command=self.txValue.yview)
 
@@ -1001,9 +970,7 @@ class neurojgui:
             self.search_frame.pack_forget()
             self.search_visible = False
         else:
-            self.search_frame.pack(
-                side=self.tk.TOP, fill=self.tk.X, before=self.main_frame
-            )
+            self.search_frame.pack(side=self.tk.TOP, fill=self.tk.X, before=self.main_frame)
             self.search_visible = True
 
     def clear_search(self):
@@ -1055,14 +1022,14 @@ class neurojgui:
         if age_min:
             try:
                 queryurl += f"agemin={int(float(age_min) * 100):05d}&"
-            except:
+            except Exception:
                 pass
 
         age_max = self.search_age_max.get().strip()
         if age_max:
             try:
                 queryurl += f"agemax={int(float(age_max) * 100):05d}&"
-            except:
+            except Exception:
                 pass
 
         task_name = self.search_task_name.get().strip()
@@ -1233,16 +1200,12 @@ class neurojgui:
                 dslist = neuroj("list", db_name)
                 # Filter out system datasets starting with '_'
                 datasets = [
-                    dataset
-                    for dataset in dslist["dataset"]
-                    if not dataset["id"].startswith("_")
+                    dataset for dataset in dslist["dataset"] if not dataset["id"].startswith("_")
                 ]
 
                 self.lsDs.delete(0, self.tk.END)
                 for dataset in datasets:
-                    self.lsDs.insert(
-                        self.tk.END, self.get_icon_text("data", dataset["id"])
-                    )
+                    self.lsDs.insert(self.tk.END, self.get_icon_text("data", dataset["id"]))
 
             if self.lsDs.size() > 0:
                 self.lsDs.selection_set(0)
@@ -1276,9 +1239,7 @@ class neurojgui:
                 subjects = self.search_subjects[key]
                 self.lsJSON.delete(0, self.tk.END)
                 for subj in subjects:
-                    self.lsJSON.insert(
-                        self.tk.END, self.get_icon_text("data", f"sub-{subj}")
-                    )
+                    self.lsJSON.insert(self.tk.END, self.get_icon_text("data", f"sub-{subj}"))
                 self.txValue.delete("1.0", self.tk.END)
                 self.txValue.insert(
                     "1.0",
@@ -1301,9 +1262,7 @@ class neurojgui:
                     for datakey in self.datasets.keys():
                         val = self.datasets.get(datakey)
                         icontype = self.detect_data_type(val, datakey)
-                        self.lsJSON.insert(
-                            self.tk.END, self.get_icon_text(icontype, datakey)
-                        )
+                        self.lsJSON.insert(self.tk.END, self.get_icon_text(icontype, datakey))
 
                     if self.lsJSON.size() > 0:
                         self.lsJSON.selection_set(0)

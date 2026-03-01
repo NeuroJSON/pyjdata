@@ -47,12 +47,8 @@ class Test_snirf(unittest.TestCase):
         )
         datashape = self.snirfdata["nirs"]["data"][0]["dataTimeSeries"].shape
         self.assertEqual(datashape, (1200, 8))
-        self.assertEqual(
-            self.snirfdata["nirs"]["data"][0]["time"].shape, (datashape[0],)
-        )
-        self.assertEqual(
-            len(self.snirfdata["nirs"]["data"][0]["measurementList"]), datashape[1]
-        )
+        self.assertEqual(self.snirfdata["nirs"]["data"][0]["time"].shape, (datashape[0],))
+        self.assertEqual(len(self.snirfdata["nirs"]["data"][0]["measurementList"]), datashape[1])
         self.assertEqual(
             list(self.snirfdata["nirs"]["data"][0]["measurementList"][0].keys()),
             [
@@ -95,12 +91,8 @@ class Test_snirf(unittest.TestCase):
         )
         datashape = self.snirfdata["nirs"]["data"][0]["dataTimeSeries"].shape
         self.assertEqual(datashape, (1200, 8))
-        self.assertEqual(
-            self.snirfdata["nirs"]["data"][0]["time"].shape, (datashape[0],)
-        )
-        self.assertEqual(
-            len(self.snirfdata["nirs"]["data"][0]["measurementList"]), datashape[1]
-        )
+        self.assertEqual(self.snirfdata["nirs"]["data"][0]["time"].shape, (datashape[0],))
+        self.assertEqual(len(self.snirfdata["nirs"]["data"][0]["measurementList"]), datashape[1])
         self.assertEqual(
             list(self.snirfdata["nirs"]["data"][0]["measurementList"][0].keys()),
             [

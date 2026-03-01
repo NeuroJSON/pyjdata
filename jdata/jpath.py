@@ -18,15 +18,15 @@ import json
 import copy
 
 
-def jsonpath(root, jpath, opt={}):
+def jsonpath(root, jpath, opt=None):
+    if opt is None:
+        opt = {}
     obj = root
     jpath = re.sub(r"([^.\]])(\[[-0-9:\*]+\])", r"\1.\2", jpath)
     jpath = re.sub(r"\[[\'\"]*([^]\'\"]+)[\'\"]*\]", r".[\1]", jpath)
     jpath = re.sub(r"\\.", "_0x2E_", jpath)
     while re.search(r"(\[[\'\"]*[^]\'\"]+)\.(?=[^]\'\"]+[\'\"]*\])", jpath):
-        jpath = re.sub(
-            r"(\[[\'\"]*[^]\'\"]+)\.(?=[^]\'\"]+[\'\"]*\])", r"\1_0x2E_", jpath
-        )
+        jpath = re.sub(r"(\[[\'\"]*[^]\'\"]+)\.(?=[^]\'\"]+[\'\"]*\])", r"\1_0x2E_", jpath)
 
     paths = re.findall(r"(\.{0,2}[^.]+)", jpath)
     paths = [re.sub("_0x2E_", ".", x) for x in paths]
@@ -65,12 +65,8 @@ def getonelevel(input_data, paths, pathid, opt):
         if ":" in arraystr:
             match = re.search(r"(?P<start>-*\d*):(?P<end>-*\d*)", arraystr)
             if match:
-                arrayrange["start"] = (
-                    int(match.group("start")) if match.group("start") else None
-                )
-                arrayrange["end"] = (
-                    int(match.group("end")) if match.group("end") else None
-                )
+                arrayrange["start"] = int(match.group("start")) if match.group("start") else None
+                arrayrange["end"] = int(match.group("end")) if match.group("end") else None
 
                 if arrayrange["start"] is not None:
                     if arrayrange["start"] < 0:
@@ -111,9 +107,7 @@ def getonelevel(input_data, paths, pathid, opt):
             searchkey = ".." + pathname if deepscan else origpath
             newobj = []
             for idx, item in enumerate(input_data):
-                val, isfound = getonelevel(
-                    item, paths[:pathid] + [searchkey], pathid, opt
-                )
+                val, isfound = getonelevel(item, paths[:pathid] + [searchkey], pathid, opt)
                 if isfound:
                     if isinstance(val, list):
                         if len(val) > 1:

@@ -21,7 +21,8 @@ import numpy as np
 # Import jdata functions from the same package
 from .jfile import savejson, saveb, loadt, savejd, load, loadsnirf
 from .jnifti import nii2jnii
-from .csv import load_csv_tsv, is_enum_encoded, decode_enum_column, json2tsv
+from .csvtsv import load_csv_tsv, is_enum_encoded, decode_enum_column, json2tsv
+import warnings
 
 __all__ = [
     "dataset2json",
@@ -126,9 +127,7 @@ def dataset2json(
     # Dry-run mode: just list commands
     if not convert:
         for ds in datasets:
-            result["commands"].append(
-                f"convert_dataset({dbname}, {ds}, threads={threads})"
-            )
+            result["commands"].append(f"convert_dataset({dbname}, {ds}, threads={threads})")
             result["commands"].append(f"mergejson({outputroot}/{ds})")
             result["commands"].append(f"bids2json({outputroot}, {ds})")
         return result
@@ -174,9 +173,7 @@ def dataset2json(
                     result["errors"].append(f"{futures[future][1]}: {error}")
     else:
         for ds, fp in all_files:
-            success, error = _convert_file_safe(
-                inputroot, outputroot, dbname, ds, fp, config
-            )
+            success, error = _convert_file_safe(inputroot, outputroot, dbname, ds, fp, config)
             if success:
                 result["files_processed"] += 1
             else:
@@ -188,9 +185,9 @@ def dataset2json(
     for ds in result["datasets_processed"]:
         outpath = os.path.join(outputroot, ds)
         # Copy dataset_description.json if needed
-        dd_in, dd_out = os.path.join(
-            inputroot, ds, "dataset_description.json"
-        ), os.path.join(outpath, "dataset_description.json")
+        dd_in, dd_out = os.path.join(inputroot, ds, "dataset_description.json"), os.path.join(
+            outpath, "dataset_description.json"
+        )
         if os.path.exists(dd_in) and not os.path.exists(dd_out):
             os.makedirs(outpath, exist_ok=True)
             shutil.copy2(dd_in, dd_out)
@@ -215,9 +212,7 @@ def _build_config(kwargs: Dict) -> Dict:
             config[key.upper()] = int(env_val)
         if key in kwargs:
             config[key.upper()] = kwargs[key]
-    config["FALLBACK_URL"] = kwargs.get(
-        "fallback_url", os.environ.get("NJPREP_FALLBACK_URL", "")
-    )
+    config["FALLBACK_URL"] = kwargs.get("fallback_url", os.environ.get("NJPREP_FALLBACK_URL", ""))
     if "attach_url" in kwargs:
         config["ATTACH_URL_TEMPLATE"] = kwargs["attach_url"]
     return config
@@ -230,9 +225,7 @@ def _get_dataset_list(inputroot: str, dsname: str) -> List[str]:
     if dsname and re.search(r"\s+", dsname):
         return dsname.split()
     return [
-        os.path.basename(d.rstrip("/\\"))
-        for d in glob.glob(f"{inputroot}/*/")
-        if os.path.isdir(d)
+        os.path.basename(d.rstrip("/\\")) for d in glob.glob(f"{inputroot}/*/") if os.path.isdir(d)
     ]
 
 
@@ -240,9 +233,7 @@ def _finalize_result(result: Dict) -> Dict:
     """Set final status based on errors."""
     if result["errors"]:
         result["status"] = (
-            "partial"
-            if result["datasets_processed"] or result["files_processed"]
-            else "error"
+            "partial" if result["datasets_processed"] or result["files_processed"] else "error"
         )
     return result
 
@@ -277,13 +268,9 @@ def _file_hash(filepath: str, algorithm: str = "sha256") -> str:
     return h.hexdigest()
 
 
-def _check_duplicate(
-    outputroot: str, dsname: str, contenthash: str, suffix: str
-) -> str:
+def _check_duplicate(outputroot: str, dsname: str, contenthash: str, suffix: str) -> str:
     """Check if content hash already exists, return JSONPath reference or None."""
-    hashpathfile = os.path.join(
-        outputroot, ".hash", dsname, f"{contenthash}{suffix}.path"
-    )
+    hashpathfile = os.path.join(outputroot, ".hash", dsname, f"{contenthash}{suffix}.path")
     if os.path.exists(hashpathfile):
         with open(hashpathfile, "r") as f:
             original_path = f.read().strip()
@@ -400,9 +387,7 @@ def _convert_file(
 
     # Get file info
     is_link = os.path.islink(filepath)
-    filesize = (
-        os.path.getsize(filepath) if os.path.isfile(filepath) and not is_link else 0
-    )
+    filesize = os.path.getsize(filepath) if os.path.isfile(filepath) and not is_link else 0
     contenthash = _file_hash(filepath) if filesize > 0 else None
 
     attach_url = config["ATTACH_URL_TEMPLATE"].format(db=dbname, ds=dsname, file="")
@@ -526,9 +511,7 @@ def _convert_file(
         # Default: create external link
         _save_json(
             outfile + ".json",
-            {
-                "_DataLink_": f"{attach_url}{dsname}&size={filesize}&file={_url_encode(relpath2)}"
-            },
+            {"_DataLink_": f"{attach_url}{dsname}&size={filesize}&file={_url_encode(relpath2)}"},
         )
 
 
@@ -621,9 +604,7 @@ def _convert_json_file(
             _save_json(outfile + ".json", {"_DataLink_": existing})
         else:
             data = loadt(filepath, decode=False)
-            _save_json(
-                outfile if outfile.endswith(".json") else outfile + ".json", data
-            )
+            _save_json(outfile if outfile.endswith(".json") else outfile + ".json", data)
             _register_hash(outputroot, dsname, sha1, "", relpath2)
     else:
         suffix = ".json"
@@ -639,9 +620,7 @@ def _convert_json_file(
             attsize = os.path.getsize(attfile)
             _save_json(
                 outfile + ".json",
-                {
-                    "_DataLink_": f"{attach_url}{dsname}&size={attsize}&file={contenthash}{suffix}"
-                },
+                {"_DataLink_": f"{attach_url}{dsname}&size={attsize}&file={contenthash}{suffix}"},
             )
             _register_hash(outputroot, dsname, contenthash, suffix, relpath2)
 
@@ -672,16 +651,12 @@ def _convert_binary_json(
             shutil.copy2(filepath, os.path.join(attdir, f"{contenthash}{ext}"))
             _save_json(
                 outfile + ".json",
-                {
-                    "_DataLink_": f"{attach_url}{dsname}&size={filesize}&file={contenthash}{ext}"
-                },
+                {"_DataLink_": f"{attach_url}{dsname}&size={filesize}&file={contenthash}{ext}"},
             )
             _register_hash(outputroot, dsname, contenthash, ext, relpath2)
 
 
-def _convert_bvec(
-    filepath, outfile, relpath2, dsname, filesize, config, fallback_url, outputroot
-):
+def _convert_bvec(filepath, outfile, relpath2, dsname, filesize, config, fallback_url, outputroot):
     """Convert bval/bvec files."""
     if filesize > config["MAX_BVEC"]:
         _save_json(
@@ -925,9 +900,7 @@ def _resolve_datalink(link: str, filepath: str, rootdata: Dict = None) -> None:
                         break
                     export_root = parent
 
-                target_path = (
-                    os.path.join(export_root, relpath) if export_root else relpath
-                )
+                target_path = os.path.join(export_root, relpath) if export_root else relpath
                 try:
                     rel_target = os.path.relpath(target_path, dest_dir)
                     if os.path.exists(filepath) or os.path.islink(filepath):
@@ -935,7 +908,7 @@ def _resolve_datalink(link: str, filepath: str, rootdata: Dict = None) -> None:
                     os.symlink(rel_target, filepath)
                     return
                 except (ValueError, OSError) as e:
-                    print(f"Warning: Could not create symlink {filepath}: {e}")
+                    warnings.warn(f"Warning: Could not create symlink {filepath}: {e}")
 
     elif link.startswith("symlink:"):
         # Explicit symlink
@@ -945,7 +918,7 @@ def _resolve_datalink(link: str, filepath: str, rootdata: Dict = None) -> None:
                 os.remove(filepath)
             os.symlink(target, filepath)
         except OSError as e:
-            print(f"Warning: Could not create symlink {filepath}: {e}")
+            warnings.warn(f"Warning: Could not create symlink {filepath}: {e}")
         return
 
     elif link.startswith(("http://", "https://")):
@@ -953,7 +926,7 @@ def _resolve_datalink(link: str, filepath: str, rootdata: Dict = None) -> None:
         _download_file(link, filepath)
         return
 
-    print(f"Warning: Unknown _DataLink_ format: {link}")
+    warnings.warn(f"Warning: Unknown _DataLink_ format: {link}")
 
 
 def _download_file(url: str, filepath: str) -> None:
@@ -1006,16 +979,14 @@ def _download_file(url: str, filepath: str) -> None:
         print(f"  Saved: {filepath}")
 
     except urllib.error.HTTPError as e:
-        print(f"Warning: HTTP error downloading {url}: {e.code} {e.reason}")
+        warnings.warn(f"Warning: HTTP error downloading {url}: {e.code} {e.reason}")
     except urllib.error.URLError as e:
-        print(f"Warning: URL error downloading {url}: {e.reason}")
+        warnings.warn(f"Warning: URL error downloading {url}: {e.reason}")
     except Exception as e:
-        print(f"Warning: Error downloading {url}: {e}")
+        warnings.warn(f"Warning: Error downloading {url}: {e}")
 
 
-def _convert_attachment(
-    filepath, outfile, relpath2, dsname, contenthash, attach_url, outputroot
-):
+def _convert_attachment(filepath, outfile, relpath2, dsname, contenthash, attach_url, outputroot):
     """Copy binary files (images, PDFs) as attachments."""
     ext = _get_extension(filepath) or os.path.splitext(filepath)[1]
     existing = _check_duplicate(outputroot, dsname, contenthash, ext)
@@ -1029,9 +1000,7 @@ def _convert_attachment(
         attsize = os.path.getsize(attfile)
         _save_json(
             outfile + ".json",
-            {
-                "_DataLink_": f"{attach_url}{dsname}&size={attsize}&file={contenthash}{ext}"
-            },
+            {"_DataLink_": f"{attach_url}{dsname}&size={attsize}&file={contenthash}{ext}"},
         )
         _register_hash(outputroot, dsname, contenthash, ext, relpath2)
 
@@ -1074,7 +1043,7 @@ def _mergejson(folder: str) -> None:
                         current = current.setdefault(part, {})
                     current[parts[-1]] = data
                 except Exception as e:
-                    print(f"Error reading {fpath}: {e}")
+                    warnings.warn(f"Error reading {fpath}: {e}")
 
         if result:
             with open(os.path.join(folder, f"{subfolder_name}.json"), "w") as f:
@@ -1101,7 +1070,7 @@ def _bids2json(outputroot: str, dsname: str) -> None:
                 key = re.sub(r"\.(jnii|jnirs|json)$", "", item)
                 result[key] = data
             except Exception as e:
-                print(f"Error reading {itempath}: {e}")
+                warnings.warn(f"Error reading {itempath}: {e}")
 
     with open(os.path.join(outputroot, f"{dsname}.json"), "w") as f:
         json.dump(result, f, separators=(",", ":"))

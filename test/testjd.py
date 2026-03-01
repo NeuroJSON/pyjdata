@@ -34,9 +34,7 @@ def debug_print(data, **kwargs):
 def test_jdata(testname, fhandle, input, expected, **varargs):
     res = fhandle(input, **varargs)
     if not (str(res).strip() == expected):
-        warnings.warn(
-            f'Test {testname}: failed: expected "{expected}", obtained "{res}"'
-        )
+        warnings.warn(f'Test {testname}: failed: expected "{expected}", obtained "{res}"')
     else:
         print(f'Testing {testname}: ok\n\toutput:"{str(res).strip()}"')
 
@@ -54,9 +52,7 @@ class TestModule(unittest.TestCase):
         test_jdata("inf", debug_print, float("inf"), '"_Inf_"')
         test_jdata("-inf", debug_print, float("-inf"), '"-_Inf_"')
         test_jdata("large integer", debug_print, 2**64, "18446744073709551616")
-        test_jdata(
-            "large negative integer", debug_print, -(2**63), "-9223372036854775808"
-        )
+        test_jdata("large negative integer", debug_print, -(2**63), "-9223372036854775808")
         test_jdata("boolean as 01", debug_print, [True, False], "[true,false]")
         test_jdata("empty array", debug_print, [], "[]")
         test_jdata("empty cell", debug_print, [], "[]")

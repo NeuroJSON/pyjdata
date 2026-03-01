@@ -59,13 +59,11 @@ class jdict:
                     from jdata import load as jd_load
 
                     object.__setattr__(self, "_data", jd_load(data))
-                except:
+                except Exception:
                     try:
                         with urlopen(data) as resp:
-                            object.__setattr__(
-                                self, "_data", json.loads(resp.read().decode())
-                            )
-                    except:
+                            object.__setattr__(self, "_data", json.loads(resp.read().decode()))
+                    except Exception:
                         object.__setattr__(self, "_data", data)
             elif isinstance(data, jdict):
                 object.__setattr__(self, "_data", copy.deepcopy(data._data))
@@ -268,7 +266,7 @@ class jdict:
             return
 
         if isinstance(key, str) and key.startswith("$"):
-            jsonpath(data, key, value)
+            _simple_jsonpath_set(data, key, value)
             return
 
         if data is None:
@@ -322,7 +320,7 @@ class jdict:
             from jdata import save as jd_save
 
             return jd_save(self._data, **kwargs)
-        except:
+        except Exception:
             return json.dumps(self._data, **kwargs)
 
     def fromjson(self, source, **kwargs):
@@ -330,7 +328,7 @@ class jdict:
             from jdata import load as jd_load
 
             object.__setattr__(self, "_data", jd_load(source, **kwargs))
-        except:
+        except Exception:
             if isinstance(source, str):
                 if source.startswith("{") or source.startswith("["):
                     object.__setattr__(self, "_data", json.loads(source))
@@ -437,7 +435,7 @@ class jdict:
                 from jdata import load as jd_load
 
                 object.__setattr__(self, "_schema", jd_load(schemadata))
-            except:
+            except Exception:
                 if schemadata.startswith("{"):
                     object.__setattr__(self, "_schema", json.loads(schemadata))
                 else:
@@ -613,11 +611,7 @@ class _DimAccessor:
         # Build index tuple
         idx = [slice(None)] * data.ndim
         coords = _get_attr_value(p._attr, p._currentpath, "coords")
-        idx[dimpos] = (
-            _coordlookup(coords.get(self._dimname), sel, self._dimname)
-            if coords
-            else sel
-        )
+        idx[dimpos] = _coordlookup(coords.get(self._dimname), sel, self._dimname) if coords else sel
 
         # Slice and build new jdict
         result = data[tuple(idx)]
@@ -625,14 +619,10 @@ class _DimAccessor:
 
         # Update dims/coords for cascade (remove dim if scalar selection)
         new_attr = {"$": {}}
-        new_attr["$"]["dims"] = [
-            d for d in dims if not (is_scalar and d == self._dimname)
-        ]
+        new_attr["$"]["dims"] = [d for d in dims if not (is_scalar and d == self._dimname)]
         if coords:
             new_attr["$"]["coords"] = {
-                k: v
-                for k, v in coords.items()
-                if not (is_scalar and k == self._dimname)
+                k: v for k, v in coords.items() if not (is_scalar and k == self._dimname)
             }
 
         newobj = jdict.__new__(jdict)
@@ -664,9 +654,7 @@ def _coordlookup(coords, sel, dimname):
     is_numeric_coords = np.issubdtype(coords_arr.dtype, np.number)
 
     # Numeric value(s) on numeric coords -> lookup
-    if is_numeric_coords and isinstance(
-        sel, (int, float, np.number, list, tuple, np.ndarray)
-    ):
+    if is_numeric_coords and isinstance(sel, (int, float, np.number, list, tuple, np.ndarray)):
         if isinstance(sel, (int, float, np.number)):
             idx = np.where(coords_arr == sel)[0]
             if len(idx) == 0:
@@ -683,9 +671,7 @@ def _coordlookup(coords, sel, dimname):
     if isinstance(sel, dict) and "start" in sel:
         coords_list = coords_arr.tolist()
         start = coords_list.index(sel["start"]) if sel.get("start") else 0
-        stop = (
-            coords_list.index(sel["stop"]) + 1 if sel.get("stop") else len(coords_list)
-        )
+        stop = coords_list.index(sel["stop"]) + 1 if sel.get("stop") else len(coords_list)
         return slice(start, stop)
 
     # String or list of strings -> index lookup
