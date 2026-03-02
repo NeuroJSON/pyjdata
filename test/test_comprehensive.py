@@ -337,7 +337,7 @@ class TestCompressionRoundtrips(unittest.TestCase):
     """Test encode/decode with various compression codecs."""
 
     def setUp(self):
-        self.arr = np.arange(100, dtype=np.float64)
+        self.arr = np.arange(500, dtype=np.float64)
 
     def _roundtrip_compression(self, method):
         encoded = encode(self.arr, compression=method, base64=True)
@@ -1149,6 +1149,403 @@ class TestTsvJsonConversion(unittest.TestCase):
         data = {"col": encoded_col, "other": list(range(200))}
         tsv_str = json2tsv(data)
         self.assertIn("col", tsv_str)
+
+
+# ============================================================================
+# Sparse array encoding/decoding (requires scipy)
+# ============================================================================
+
+
+class TestSparseEncoding(unittest.TestCase):
+    """Test encoding of scipy sparse matrices to JData _ArrayIsSparse_ format."""
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            import scipy.sparse
+
+            cls.sp = scipy.sparse
+            cls.has_scipy = True
+        except ImportError:
+            cls.has_scipy = False
+
+    def setUp(self):
+        if not self.has_scipy:
+            self.skipTest("scipy not installed")
+
+    def test_csr_real(self):
+        """Encode a real CSR sparse matrix."""
+        m = self.sp.csr_matrix(([1.0, 2.0, 3.0], ([0, 1, 2], [2, 0, 1])), shape=(3, 3))
+        result = encode(m)
+        self.assertIn("_ArrayIsSparse_", result)
+        self.assertTrue(result["_ArrayIsSparse_"])
+        self.assertEqual(result["_ArraySize_"], [3, 3])
+        self.assertIn("_ArrayType_", result)
+        self.assertNotIn("_ArrayIsComplex_", result)
+
+    def test_csc_real(self):
+        """Encode a real CSC sparse matrix."""
+        m = self.sp.csc_matrix(([5.0, 6.0], ([0, 2], [1, 0])), shape=(3, 3))
+        result = encode(m)
+        self.assertTrue(result["_ArrayIsSparse_"])
+        self.assertEqual(result["_ArraySize_"], [3, 3])
+
+    def test_coo_real(self):
+        """Encode a real COO sparse matrix."""
+        m = self.sp.coo_matrix(([10.0, 20.0, 30.0], ([0, 1, 2], [0, 1, 2])), shape=(3, 3))
+        result = encode(m)
+        self.assertTrue(result["_ArrayIsSparse_"])
+
+    def test_sparse_indices_are_1based(self):
+        """JData spec requires 1-based indices."""
+        m = self.sp.csr_matrix(([7.0], ([0], [0])), shape=(2, 2))
+        result = encode(m)
+        data = result["_ArrayData_"]
+        # First nonzero is at (0,0) in Python -> (1,1) in JData
+        self.assertEqual(data[0][0], 1.0)  # row index
+        self.assertEqual(data[1][0], 1.0)  # col index
+        self.assertEqual(data[2][0], 7.0)  # value
+
+    def test_sparse_complex(self):
+        """Encode a complex sparse matrix."""
+        m = self.sp.csr_matrix(([1 + 2j, 3 + 4j], ([0, 1], [1, 0])), shape=(2, 2))
+        result = encode(m)
+        self.assertTrue(result["_ArrayIsSparse_"])
+        self.assertTrue(result["_ArrayIsComplex_"])
+        data = result["_ArrayData_"]
+        # 4 rows: row_idx, col_idx, real, imag
+        self.assertEqual(len(data), 4)
+        self.assertAlmostEqual(data[2][0], 1.0)  # real part of first element
+        self.assertAlmostEqual(data[3][0], 2.0)  # imag part of first element
+
+    def test_sparse_empty(self):
+        """Encode an empty sparse matrix."""
+        m = self.sp.csr_matrix((3, 4))
+        result = encode(m)
+        self.assertTrue(result["_ArrayIsSparse_"])
+        self.assertEqual(result["_ArraySize_"], [3, 4])
+
+    def test_sparse_arraydata_shape(self):
+        """Real sparse: _ArrayData_ should have 3 rows (i, j, val)."""
+        m = self.sp.csr_matrix(
+            ([1.0, 2.0, 3.0, 4.0], ([0, 0, 1, 2], [0, 2, 1, 2])),
+            shape=(3, 3),
+        )
+        result = encode(m)
+        data = result["_ArrayData_"]
+        self.assertEqual(len(data), 3)
+        self.assertEqual(len(data[0]), 4)  # 4 nonzeros
+
+    def test_sparse_int_values(self):
+        """Sparse matrix with integer dtype."""
+        m = self.sp.csr_matrix(np.array([[1, 0, 0], [0, 0, 2], [0, 3, 0]], dtype=np.int32))
+        result = encode(m)
+        self.assertTrue(result["_ArrayIsSparse_"])
+
+    def test_sparse_large_with_compression(self):
+        """Large sparse matrix should trigger compression."""
+        row = np.arange(500)
+        col = np.arange(500)
+        data = np.random.rand(500)
+        m = self.sp.csr_matrix((data, (row, col)), shape=(1000, 1000))
+        result = encode(m, compression="zlib", base64=True, compressarraysize=100)
+        self.assertTrue(result["_ArrayIsSparse_"])
+        self.assertIn("_ArrayZipData_", result)
+        self.assertNotIn("_ArrayData_", result)
+
+
+class TestSparseDecoding(unittest.TestCase):
+    """Test decoding of JData _ArrayIsSparse_ constructs to scipy sparse."""
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            import scipy.sparse
+
+            cls.sp = scipy.sparse
+            cls.has_scipy = True
+        except ImportError:
+            cls.has_scipy = False
+
+    def setUp(self):
+        if not self.has_scipy:
+            self.skipTest("scipy not installed")
+
+    def test_decode_real_sparse(self):
+        """Decode a real sparse JData construct."""
+        jd_sparse = {
+            "_ArrayType_": "double",
+            "_ArraySize_": [3, 3],
+            "_ArrayIsSparse_": True,
+            "_ArrayData_": [[1, 2, 3], [1, 2, 3], [10.0, 20.0, 30.0]],
+        }
+        result = decode(jd_sparse)
+        self.assertTrue(self.sp.issparse(result))
+        self.assertEqual(result.shape, (3, 3))
+        # (0,0)=10, (1,1)=20, (2,2)=30 (converted from 1-based)
+        self.assertAlmostEqual(result[0, 0], 10.0)
+        self.assertAlmostEqual(result[1, 1], 20.0)
+        self.assertAlmostEqual(result[2, 2], 30.0)
+        # Off-diagonal should be zero
+        self.assertAlmostEqual(result[0, 1], 0.0)
+
+    def test_decode_complex_sparse(self):
+        """Decode a complex sparse JData construct."""
+        jd_sparse = {
+            "_ArrayType_": "double",
+            "_ArraySize_": [2, 2],
+            "_ArrayIsSparse_": True,
+            "_ArrayIsComplex_": True,
+            "_ArrayData_": [[1, 2], [2, 1], [1.0, 3.0], [2.0, 4.0]],
+        }
+        result = decode(jd_sparse)
+        self.assertTrue(self.sp.issparse(result))
+        self.assertEqual(result.shape, (2, 2))
+        # (0,1) = 1+2j, (1,0) = 3+4j
+        self.assertAlmostEqual(result[0, 1], 1.0 + 2.0j)
+        self.assertAlmostEqual(result[1, 0], 3.0 + 4.0j)
+
+    def test_decode_empty_sparse(self):
+        """Decode an empty sparse construct."""
+        jd_sparse = {
+            "_ArrayType_": "double",
+            "_ArraySize_": [4, 5],
+            "_ArrayIsSparse_": True,
+            "_ArrayData_": [[], [], []],
+        }
+        result = decode(jd_sparse)
+        self.assertTrue(self.sp.issparse(result))
+        self.assertEqual(result.shape, (4, 5))
+        self.assertEqual(result.nnz, 0)
+
+    def test_decode_single_element(self):
+        """Decode sparse with a single nonzero."""
+        jd_sparse = {
+            "_ArrayType_": "double",
+            "_ArraySize_": [10, 10],
+            "_ArrayIsSparse_": True,
+            "_ArrayData_": [[5], [7], [99.0]],
+        }
+        result = decode(jd_sparse)
+        self.assertTrue(self.sp.issparse(result))
+        self.assertAlmostEqual(result[4, 6], 99.0)  # 1-based -> 0-based
+
+
+class TestSparseRoundtrips(unittest.TestCase):
+    """Test full encode -> decode roundtrips for sparse matrices."""
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            import scipy.sparse
+
+            cls.sp = scipy.sparse
+            cls.has_scipy = True
+        except ImportError:
+            cls.has_scipy = False
+
+    def setUp(self):
+        if not self.has_scipy:
+            self.skipTest("scipy not installed")
+
+    def test_real_sparse_roundtrip(self):
+        """Encode then decode a real sparse matrix."""
+        original = self.sp.csr_matrix(([1.0, 2.0, 3.0], ([0, 1, 2], [2, 0, 1])), shape=(3, 3))
+        encoded = encode(original)
+        decoded = decode(encoded)
+        self.assertTrue(self.sp.issparse(decoded))
+        diff = (original - decoded).toarray()
+        np.testing.assert_array_almost_equal(diff, np.zeros((3, 3)))
+
+    def test_complex_sparse_roundtrip(self):
+        """Encode then decode a complex sparse matrix."""
+        original = self.sp.csr_matrix(
+            ([1 + 2j, 3 + 4j, 5 + 6j], ([0, 1, 2], [1, 2, 0])), shape=(3, 3)
+        )
+        encoded = encode(original)
+        decoded = decode(encoded)
+        self.assertTrue(self.sp.issparse(decoded))
+        diff = (original - decoded).toarray()
+        np.testing.assert_array_almost_equal(diff, np.zeros((3, 3)))
+
+    def test_diagonal_roundtrip(self):
+        """Diagonal sparse matrix roundtrip."""
+        original = self.sp.diags([1.0, 2.0, 3.0, 4.0, 5.0])
+        encoded = encode(original)
+        decoded = decode(encoded)
+        self.assertTrue(self.sp.issparse(decoded))
+        np.testing.assert_array_almost_equal(original.toarray(), decoded.toarray())
+
+    def test_identity_roundtrip(self):
+        """Sparse identity matrix roundtrip."""
+        original = self.sp.eye(10)
+        encoded = encode(original)
+        decoded = decode(encoded)
+        np.testing.assert_array_almost_equal(original.toarray(), decoded.toarray())
+
+    def test_large_sparse_compressed_roundtrip(self):
+        """Large sparse with compression roundtrip."""
+        row = np.arange(400)
+        col = np.arange(400)
+        data = np.random.rand(400)
+        original = self.sp.csr_matrix((data, (row, col)), shape=(500, 500))
+        encoded = encode(original, compression="zlib", base64=True, compressarraysize=100)
+        self.assertIn("_ArrayZipData_", encoded)
+        decoded = decode(encoded, base64=True)
+        self.assertTrue(self.sp.issparse(decoded))
+        np.testing.assert_array_almost_equal(original.toarray(), decoded.toarray())
+
+    def test_complex_sparse_compressed_roundtrip(self):
+        """Complex sparse with compression roundtrip."""
+        row = np.array([0, 1, 2, 3])
+        col = np.array([3, 2, 1, 0])
+        data = np.array([1 + 1j, 2 + 2j, 3 + 3j, 4 + 4j])
+        original = self.sp.csr_matrix((data, (row, col)), shape=(4, 4))
+        encoded = encode(original)
+        decoded = decode(encoded)
+        self.assertTrue(self.sp.issparse(decoded))
+        np.testing.assert_array_almost_equal(original.toarray(), decoded.toarray())
+
+    def test_json_file_sparse_roundtrip(self):
+        """Save and load sparse through JSON file."""
+        original = self.sp.csr_matrix(([10.0, 20.0, 30.0], ([0, 1, 2], [0, 1, 2])), shape=(3, 3))
+        with TempDir() as tmpdir:
+            path = os.path.join(tmpdir, "sparse.json")
+            jd.save({"m": original}, path)
+            loaded = jd.load(path)
+            decoded = loaded["m"]
+            self.assertTrue(self.sp.issparse(decoded))
+            np.testing.assert_array_almost_equal(original.toarray(), decoded.toarray())
+
+
+class TestSparseCompressionRoundtrips(unittest.TestCase):
+    """Test sparse encode/decode with every compression codec, real and complex."""
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            import scipy.sparse
+
+            cls.sp = scipy.sparse
+            cls.has_scipy = True
+        except ImportError:
+            cls.has_scipy = False
+
+    def setUp(self):
+        if not self.has_scipy:
+            self.skipTest("scipy not installed")
+        # Build real and complex sparse matrices large enough to trigger compression
+        n = 500
+        row = np.arange(n)
+        col = np.arange(n)
+        self.real_sparse = self.sp.csr_matrix(
+            (np.random.rand(n), (row, col)), shape=(n + 100, n + 100)
+        )
+        self.complex_sparse = self.sp.csr_matrix(
+            (np.random.rand(n) + 1j * np.random.rand(n), (row, col)),
+            shape=(n + 100, n + 100),
+        )
+
+    def _roundtrip_sparse(self, mat, method):
+        encoded = encode(mat, compression=method, base64=True, compressarraysize=100)
+        self.assertIsInstance(
+            encoded,
+            dict,
+            "encode() returned {} instead of dict - sparse encoding not working".format(
+                type(encoded).__name__
+            ),
+        )
+        self.assertTrue(encoded.get("_ArrayIsSparse_"))
+        self.assertIn("_ArrayZipType_", encoded)
+        self.assertEqual(encoded["_ArrayZipType_"], method)
+        self.assertIn("_ArrayZipData_", encoded)
+        self.assertNotIn("_ArrayData_", encoded)
+        decoded = decode(encoded, base64=True)
+        self.assertTrue(self.sp.issparse(decoded))
+        np.testing.assert_array_almost_equal(
+            mat.toarray(),
+            decoded.toarray(),
+            err_msg="Failed roundtrip for codec: {} (complex={})".format(
+                method, np.issubdtype(mat.dtype, np.complexfloating)
+            ),
+        )
+
+    # -- Real sparse + compression --
+
+    def test_real_sparse_zlib(self):
+        self._roundtrip_sparse(self.real_sparse, "zlib")
+
+    def test_real_sparse_gzip(self):
+        self._roundtrip_sparse(self.real_sparse, "gzip")
+
+    def test_real_sparse_lzma(self):
+        self._roundtrip_sparse(self.real_sparse, "lzma")
+
+    def test_real_sparse_lz4(self):
+        try:
+            import lz4.frame
+        except ImportError:
+            self.skipTest("lz4 not installed")
+        self._roundtrip_sparse(self.real_sparse, "lz4")
+
+    def test_real_sparse_base64(self):
+        self._roundtrip_sparse(self.real_sparse, "base64")
+
+    # -- Complex sparse + compression --
+
+    def test_complex_sparse_zlib(self):
+        self._roundtrip_sparse(self.complex_sparse, "zlib")
+
+    def test_complex_sparse_gzip(self):
+        self._roundtrip_sparse(self.complex_sparse, "gzip")
+
+    def test_complex_sparse_lzma(self):
+        self._roundtrip_sparse(self.complex_sparse, "lzma")
+
+    def test_complex_sparse_lz4(self):
+        try:
+            import lz4.frame
+        except ImportError:
+            self.skipTest("lz4 not installed")
+        self._roundtrip_sparse(self.complex_sparse, "lz4")
+
+    def test_complex_sparse_base64(self):
+        self._roundtrip_sparse(self.complex_sparse, "base64")
+
+    # -- File I/O with compression --
+
+    def test_real_sparse_file_compressed(self):
+        """Real sparse through JSON file with zlib compression."""
+        with TempDir() as tmpdir:
+            path = os.path.join(tmpdir, "real_sparse.json")
+            jd.save({"m": self.real_sparse}, path, compression="zlib")
+            loaded = jd.load(path)
+            self.assertTrue(self.sp.issparse(loaded["m"]))
+            np.testing.assert_array_almost_equal(self.real_sparse.toarray(), loaded["m"].toarray())
+
+    def test_complex_sparse_file_compressed(self):
+        """Complex sparse through JSON file with zlib compression."""
+        with TempDir() as tmpdir:
+            path = os.path.join(tmpdir, "complex_sparse.json")
+            jd.save({"m": self.complex_sparse}, path, compression="zlib")
+            loaded = jd.load(path)
+            self.assertTrue(self.sp.issparse(loaded["m"]))
+            np.testing.assert_array_almost_equal(
+                self.complex_sparse.toarray(), loaded["m"].toarray()
+            )
+
+    def test_real_sparse_bjd_compressed(self):
+        """Real sparse through BJData file with compression."""
+        try:
+            import bjdata
+        except ImportError:
+            self.skipTest("bjdata not installed")
+        with TempDir() as tmpdir:
+            path = os.path.join(tmpdir, "sparse.bjd")
+            jd.save({"m": self.real_sparse}, path, compression="zlib")
+            loaded = jd.load(path)
+            self.assertTrue(self.sp.issparse(loaded["m"]))
+            np.testing.assert_array_almost_equal(self.real_sparse.toarray(), loaded["m"].toarray())
 
 
 # ============================================================================

@@ -78,11 +78,61 @@ _zipper = (
     "base64",
 )
 
-_allownumpy = ("_ArraySize_", "_ArrayData_", "_ArrayZipSize_", "_ArrayZipData_")
+_allownumpy = (
+    "_ArraySize_",
+    "_ArrayData_",
+    "_ArrayZipSize_",
+    "_ArrayZipData_",
+    "_ArrayIsSparse_",
+    "_ArrayIsComplex_",
+)
 
 ##====================================================================================
 ## Python to JData encoding function
 ##====================================================================================
+
+
+def _compress_data(rawbytes, opt):
+    """Compress raw bytes using the codec specified in opt['compression']."""
+    codec = opt["compression"]
+    if codec == "zlib":
+        return zlib.compress(rawbytes)
+    elif codec == "gzip":
+        gzipper = zlib.compressobj(wbits=(zlib.MAX_WBITS | 16))
+        result = gzipper.compress(rawbytes)
+        result += gzipper.flush()
+        return result
+    elif codec == "lzma":
+        return lzma.compress(rawbytes, lzma.FORMAT_ALONE)
+    elif codec == "lz4":
+        import lz4.frame
+
+        return lz4.frame.compress(rawbytes)
+    elif codec.startswith("blosc2"):
+        import blosc2
+
+        BLOSC2CODEC = {
+            "blosc2blosclz": blosc2.Codec.BLOSCLZ,
+            "blosc2lz4": blosc2.Codec.LZ4,
+            "blosc2lz4hc": blosc2.Codec.LZ4HC,
+            "blosc2zlib": blosc2.Codec.ZLIB,
+            "blosc2zstd": blosc2.Codec.ZSTD,
+        }
+        nthread = opt.get("nthread", 1)
+        return blosc2.compress2(rawbytes, codec=BLOSC2CODEC[codec], nthreads=nthread)
+    elif codec == "base64":
+        return rawbytes
+    return rawbytes
+
+
+def _issparse(d):
+    """Check if d is a scipy sparse matrix without importing scipy at module level."""
+    try:
+        import scipy.sparse
+
+        return scipy.sparse.issparse(d)
+    except ImportError:
+        return False
 
 
 def encode(d, opt=None, **kwargs):
@@ -125,7 +175,7 @@ def encode(d, opt=None, **kwargs):
     if opt is None:
         opt = {}
     kwargs.setdefault("compression", "zlib")
-    kwargs.setdefault("compressarraysize", 200)
+    kwargs.setdefault("compressarraysize", 300)
     opt.setdefault("inplace", False)
     opt.update(kwargs)
 
@@ -178,6 +228,46 @@ def encode(d, opt=None, **kwargs):
             "_ArrayData_": [d.real, d.imag],
         }
         return newobj
+    elif _issparse(d):
+        import scipy.sparse
+
+        coo = d.tocoo()
+        newobj = {}
+        val_dtype = coo.data.dtype if len(coo.data) > 0 else np.float64
+        if np.issubdtype(val_dtype, np.complexfloating):
+            real_dtype = val_dtype.type(0).real.dtype
+        else:
+            real_dtype = val_dtype
+        newobj["_ArrayType_"] = jdtype.get(str(real_dtype), str(real_dtype))
+        newobj["_ArraySize_"] = list(d.shape)
+        newobj["_ArrayIsSparse_"] = True
+        if np.issubdtype(val_dtype, np.complexfloating):
+            newobj["_ArrayIsComplex_"] = True
+            newobj["_ArrayData_"] = [
+                (coo.row + 1).astype(np.float64).tolist(),
+                (coo.col + 1).astype(np.float64).tolist(),
+                coo.data.real.astype(np.float64).tolist(),
+                coo.data.imag.astype(np.float64).tolist(),
+            ]
+        else:
+            newobj["_ArrayData_"] = [
+                (coo.row + 1).astype(np.float64).tolist(),
+                (coo.col + 1).astype(np.float64).tolist(),
+                coo.data.astype(np.float64).tolist(),
+            ]
+        if "compression" in opt and opt["compression"] in _zipper:
+            arraydata = np.array(newobj["_ArrayData_"])
+            nrows = arraydata.shape[0]
+            nnz = arraydata.shape[1] if arraydata.ndim > 1 else 0
+            if nnz >= opt.get("compressarraysize", 300):
+                rawbytes = arraydata.astype(np.float64).tobytes()
+                newobj["_ArrayZipType_"] = opt["compression"]
+                newobj["_ArrayZipSize_"] = [nrows, nnz]
+                newobj["_ArrayZipData_"] = _compress_data(rawbytes, opt)
+                if (("base64" in opt) and (opt["base64"])) or opt["compression"] == "base64":
+                    newobj["_ArrayZipData_"] = base64.b64encode(newobj["_ArrayZipData_"])
+                newobj.pop("_ArrayData_")
+        return newobj
     elif isinstance(d, np.ndarray) or np.iscomplex(d):
         newobj = {}
         newobj["_ArrayType_"] = jdtype[str(d.dtype)] if (str(d.dtype) in jdtype) else str(d.dtype)
@@ -196,7 +286,7 @@ def encode(d, opt=None, **kwargs):
         else:
             newobj["_ArrayData_"] = d.ravel()
 
-        if "compression" in opt:
+        if "compression" in opt and d.size >= opt.get("compressarraysize", 300):
             if opt["compression"] not in _zipper:
                 raise Exception(
                     "JData",
@@ -310,6 +400,65 @@ def decode(d, opt=None, **kwargs):
         return decodelist(list(d), **opt)
     elif isinstance(d, dict):
         if "_ArrayType_" in d:
+            # Early intercept for sparse arrays
+            if "_ArrayIsSparse_" in d and d["_ArrayIsSparse_"]:
+                try:
+                    import scipy.sparse
+                except ImportError:
+                    raise ImportError('To decode sparse JData, install scipy: "pip install scipy"')
+                shape = (
+                    tuple(d["_ArraySize_"])
+                    if isinstance(d["_ArraySize_"], list)
+                    else (d["_ArraySize_"],)
+                )
+                is_complex = "_ArrayIsComplex_" in d and d["_ArrayIsComplex_"]
+                if "_ArrayZipData_" in d:
+                    # Decompress first
+                    newobj = d["_ArrayZipData_"]
+                    if isinstance(newobj, str):
+                        newobj = newobj.encode("ascii")
+                    if ("base64" in opt and opt["base64"]) or (
+                        "_ArrayZipType_" in d and d["_ArrayZipType_"] == "base64"
+                    ):
+                        newobj = base64.b64decode(newobj)
+                    if "_ArrayZipType_" in d and d["_ArrayZipType_"] != "base64":
+                        if d["_ArrayZipType_"] == "zlib":
+                            newobj = zlib.decompress(newobj)
+                        elif d["_ArrayZipType_"] == "gzip":
+                            newobj = zlib.decompress(newobj, zlib.MAX_WBITS | 16)
+                        elif d["_ArrayZipType_"] == "lzma":
+                            buf = bytearray(newobj)
+                            if len(buf) > 13:
+                                buf[5:13] = b"\xff\xff\xff\xff\xff\xff\xff\xff"
+                            newobj = lzma.decompress(buf, lzma.FORMAT_ALONE)
+                        elif d["_ArrayZipType_"] == "lz4":
+                            import lz4.frame
+
+                            newobj = lz4.frame.decompress(bytes(newobj))
+                        elif d["_ArrayZipType_"].startswith("blosc2"):
+                            import blosc2
+
+                            nthread = opt.get("nthread", 1)
+                            newobj = blosc2.decompress2(
+                                bytes(newobj), as_bytearray=False, nthreads=nthread
+                            )
+                    arraydata = np.frombuffer(bytearray(newobj), dtype=np.float64).reshape(
+                        d["_ArrayZipSize_"]
+                    )
+                else:
+                    arraydata = np.array(d["_ArrayData_"], dtype=np.float64)
+                if arraydata.ndim == 1:
+                    nrows = 4 if is_complex else 3
+                    nnz = len(arraydata) // nrows
+                    arraydata = arraydata.reshape(nrows, nnz)
+                rows = arraydata[0].astype(np.intp) - 1
+                cols = arraydata[1].astype(np.intp) - 1
+                if is_complex:
+                    vals = arraydata[2] + 1j * arraydata[3]
+                else:
+                    vals = arraydata[2]
+                return scipy.sparse.csc_matrix((vals, (rows, cols)), shape=shape)
+
             if isinstance(d["_ArraySize_"], str):
                 d["_ArraySize_"] = np.frombuffer(bytearray(d["_ArraySize_"]))
             if "_ArrayZipData_" in d:
@@ -365,6 +514,35 @@ def decode(d, opt=None, **kwargs):
                 newobj = np.frombuffer(bytearray(newobj), dtype=np.dtype(d["_ArrayType_"])).reshape(
                     d["_ArrayZipSize_"]
                 )
+                # Handle sparse arrays
+                if "_ArrayIsSparse_" in d and d["_ArrayIsSparse_"]:
+                    try:
+                        import scipy.sparse
+                    except ImportError:
+                        raise ImportError(
+                            'To decode sparse JData arrays, install scipy: "pip install scipy"'
+                        )
+                    shape = (
+                        tuple(d["_ArraySize_"])
+                        if isinstance(d["_ArraySize_"], list)
+                        else (d["_ArraySize_"],)
+                    )
+                    is_complex = "_ArrayIsComplex_" in d and d["_ArrayIsComplex_"]
+                    if isinstance(newobj, np.ndarray):
+                        arraydata = newobj
+                    else:
+                        arraydata = np.array(newobj, dtype=np.float64)
+                    if arraydata.ndim == 1:
+                        nrows = 4 if is_complex else 3
+                        nnz = len(arraydata) // nrows
+                        arraydata = arraydata.reshape(nrows, nnz)
+                    rows = arraydata[0].astype(np.intp) - 1
+                    cols = arraydata[1].astype(np.intp) - 1
+                    if is_complex:
+                        vals = arraydata[2] + 1j * arraydata[3]
+                    else:
+                        vals = arraydata[2]
+                    newobj = scipy.sparse.csc_matrix((vals, (rows, cols)), shape=shape)
                 if "_ArrayIsComplex_" in d and newobj.shape[0] == 2:
                     newobj = newobj[0] + 1j * newobj[1]
                 if "_ArrayOrder_" in d and (
@@ -377,6 +555,7 @@ def decode(d, opt=None, **kwargs):
                     newobj = newobj.reshape(d["_ArraySize_"])
                 if not hasattr(d["_ArraySize_"], "__iter__") and d["_ArraySize_"] == 1:
                     newobj = newobj.item()
+                    return newobj
                 return newobj
             elif "_ArrayData_" in d:
                 if isinstance(d["_ArrayData_"], str):
