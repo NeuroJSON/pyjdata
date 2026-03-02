@@ -84,10 +84,19 @@ jext = {
 
 
 def load(fname, opt=None, **kwargs):
-    """@brief Loading a JData file (binary or text) according to the file extension
+    """
+    Load data from a file path or URL with automatic format detection.
 
-    @param[in] fname: a JData file name (accept .json,.jdat,.jbat,.jnii,.bnii,.jmsh,.bmsh)
-    @param[in] opt: options, if opt['decode']=True or 1 (default), call jdata.decode() after loading
+    If the input starts with 'http://' or 'https://', it downloads and caches the
+    file locally before loading. Otherwise dispatches to loadjd() for local files.
+
+    Args:
+        fname (str): A local file path or URL to load data from.
+        opt (dict, optional): Legacy options dict merged into kwargs.
+        **kwargs: Loading options passed to loadjd() or downloadlink().
+
+    Returns:
+        The loaded data structure.
     """
     if opt is None:
         opt = {}
@@ -121,11 +130,17 @@ def load(fname, opt=None, **kwargs):
 
 
 def save(data, fname, opt=None, **kwargs):
-    """@brief Saving Python data to file (binary or text) according to the file extension
+    """
+    Save data to a file with automatic format detection. Alias for savejd().
 
-    @param[in] data: data to be saved
-    @param[in] fname: a JData file name
-    @param[in] opt: options, if opt['encode']=True or 1 (default), call jdata.encode() before saving
+    Args:
+        data: The Python data structure to save.
+        fname (str): Output file path.
+        opt (dict, optional): Legacy options dict merged into kwargs.
+        **kwargs: Saving options passed to savejd().
+
+    Returns:
+        None
     """
     if opt is None:
         opt = {}
@@ -159,10 +174,22 @@ def save(data, fname, opt=None, **kwargs):
 
 
 def loadurl(url, opt=None, **kwargs):
-    """@brief Loading a JData file (binary or text) from a URL without caching locally
+    """
+    Load a JData file from a URL without local caching.
 
-    @param[in] url: a REST API URL, curently only support http:// and https://
-    @param[in] opt: options, opt['nocache']=True by default, setting to False download and locally cache the data
+    Downloads data from the given URL and parses it directly without saving
+    to a local cache file. Use load() instead if caching is desired.
+
+    Args:
+        url (str): A URL (http:// or https://) to load data from.
+        opt (dict, optional): Legacy options dict merged into kwargs.
+        **kwargs: Options passed to downloadlink() with nocache=True by default.
+
+    Returns:
+        The loaded and decoded data structure.
+
+    Raises:
+        Exception: If the URL scheme is not http or https.
     """
     if opt is None:
         opt = {}
@@ -185,10 +212,22 @@ def loadurl(url, opt=None, **kwargs):
 
 
 def loadt(fname, opt=None, **kwargs):
-    """@brief Loading a text-based (JSON) JData file and decode it to native Python data
+    """
+    Load a text-based JSON JData file and decode it to native Python data.
 
-    @param[in] fname: a text JData (JSON based) file name
-    @param[in] opt: options, if opt['decode']=True or 1 (default), call jdata.decode() after loading
+    Reads a JSON file from disk, parses it, and optionally decodes JData
+    annotations (arrays, special values) back to native Python/numpy types.
+
+    Args:
+        fname (str): Path to a text-based JData file (.json, .jnii, .jdt, etc.).
+        opt (dict, optional): Legacy options dict merged into kwargs.
+        **kwargs: Options including:
+            decode (bool): If True (default), call jdata.decode() after loading.
+            strict (bool): If False (default), allow non-strict JSON parsing.
+            inplace (bool): If True (default), allow in-place decoding.
+
+    Returns:
+        The loaded and optionally decoded Python data structure (dict, list, etc.).
     """
     if opt is None:
         opt = {}
@@ -220,11 +259,22 @@ def loadt(fname, opt=None, **kwargs):
 
 
 def savet(data, fname, opt=None, **kwargs):
-    """@brief Saving a Python data structure to a text-based JData (JSON) file
+    """
+    Save a Python data structure to a text-based JSON JData file.
 
-    @param[in] data: data to be saved
-    @param[in] fname: a text JData (JSON based) file name
-    @param[in] opt: options, if opt['encode']=True or 1 (default), call jdata.encode() before saving
+    Optionally encodes the data using JData annotations before writing.
+
+    Args:
+        data: The Python data structure to save.
+        fname (str): Output file path (.json, .jnii, .jdt, etc.).
+        opt (dict, optional): Legacy options dict merged into kwargs.
+        **kwargs: Options including:
+            encode (bool): If True (default), call jdata.encode() before saving.
+            indent (int): JSON indentation level. None for compact output.
+            inplace (bool): If True (default), allow in-place encoding.
+
+    Returns:
+        None
     """
     if opt is None:
         opt = {}
@@ -260,10 +310,20 @@ def savet(data, fname, opt=None, **kwargs):
 
 
 def loadts(buf, opt=None, **kwargs):
-    """@brief Loading a text-based (JSON) JData string buffer and decode it to native Python data
+    """
+    Parse a JSON string buffer and decode it to native Python data.
 
-    @param[in] buf: a JSON string or byte-stream
-    @param[in] opt: options, if opt['decode']=True or 1 (default), call jdata.decode() after loading
+    Like loadt() but operates on an in-memory string instead of a file.
+
+    Args:
+        buf (str or bytes): A JSON string or byte-stream to parse.
+        opt (dict, optional): Legacy options dict merged into kwargs.
+        **kwargs: Options including:
+            decode (bool): If True (default), call jdata.decode() after parsing.
+            strict (bool): If False (default), allow non-strict JSON parsing.
+
+    Returns:
+        The parsed and optionally decoded Python data structure.
     """
     if opt is None:
         opt = {}
@@ -294,10 +354,23 @@ def loadts(buf, opt=None, **kwargs):
 
 
 def loadbs(buf, opt=None, **kwargs):
-    """@brief Loading a binary-JSON/BJData string buffer and decode it to native Python data
+    """
+    Parse a binary BJData/UBJSON byte buffer and decode to native Python data.
 
-    @param[in] buf: a BJData byte-buffer or byte-stream
-    @param[in] opt: options, if opt['decode']=True or 1 (default), call jdata.decode() after loading
+    Like loadb() but operates on an in-memory buffer instead of a file.
+    Requires the 'bjdata' package.
+
+    Args:
+        buf (bytes): A BJData/UBJSON byte-buffer to parse.
+        opt (dict, optional): Legacy options dict merged into kwargs.
+        **kwargs: Options including:
+            decode (bool): If True (default), call jdata.decode() after parsing.
+
+    Returns:
+        The parsed and optionally decoded Python data structure.
+
+    Raises:
+        ImportError: If the bjdata module is not installed.
     """
     if opt is None:
         opt = {}
@@ -333,10 +406,22 @@ def loadbs(buf, opt=None, **kwargs):
 
 
 def show(data, opt=None, **kwargs):
-    """@brief Printing a python data as JSON string or return the JSON string (opt['string']=True)
+    """
+    Print or return a Python data structure as a JSON string.
 
-    @param[in] data: data to be saved
-    @param[in] opt: options, if opt['encode']=True or 1 (default), call jdata.encode() before printing
+    Encodes the data with JData annotations and serializes to JSON. Useful for
+    debugging and inspecting data structures.
+
+    Args:
+        data: The Python data structure to display.
+        opt (dict, optional): Legacy options dict merged into kwargs.
+        **kwargs: Options including:
+            string (bool): If True, return the JSON string instead of printing.
+            encode (bool): If True (default), encode with JData annotations first.
+            indent (int): JSON indentation level.
+
+    Returns:
+        str or None: The JSON string if string=True, otherwise None (prints to stdout).
     """
 
     if opt is None:
@@ -373,10 +458,21 @@ def show(data, opt=None, **kwargs):
 
 
 def dumpb(data, opt=None, **kwargs):
-    """@brief Printing native python data in binary JSON stream
+    """
+    Serialize a Python data structure to a binary BJData byte stream.
 
-    @param[in] data: data to be saved
-    @param[in] opt: options, if opt['encode']=True or 1 (default), call jdata.encode() before printing
+    Requires the 'bjdata' package.
+
+    Args:
+        data: The Python data structure to serialize.
+        opt (dict, optional): Legacy options dict merged into kwargs.
+        **kwargs: Options passed through to bjdata.dumpb().
+
+    Returns:
+        bytes: The BJData-encoded byte stream.
+
+    Raises:
+        ImportError: If the bjdata module is not installed.
     """
     if opt is None:
         opt = {}
@@ -398,10 +494,23 @@ def dumpb(data, opt=None, **kwargs):
 
 
 def loadb(fname, opt=None, **kwargs):
-    """@brief Loading a binary (BJData/UBJSON) JData file and decode it to native Python data
+    """
+    Load a binary BJData/UBJSON JData file and decode it to native Python data.
 
-    @param[in] fname: a binary (BJData/UBJSON based) JData file name
-    @param[in] opt: options, if opt['decode']=True or 1 (default), call jdata.decode() before saving
+    Requires the 'bjdata' package to be installed.
+
+    Args:
+        fname (str): Path to a binary JData file (.bjd, .ubj, .bnii, etc.).
+        opt (dict, optional): Legacy options dict merged into kwargs.
+        **kwargs: Options including:
+            decode (bool): If True (default), call jdata.decode() after loading.
+            islittle (bool): If True, use little-endian byte order (BJData default).
+
+    Returns:
+        The loaded and optionally decoded Python data structure.
+
+    Raises:
+        ImportError: If the bjdata module is not installed.
     """
     if opt is None:
         opt = {}
@@ -438,11 +547,24 @@ def loadb(fname, opt=None, **kwargs):
 
 
 def saveb(data, fname, opt=None, **kwargs):
-    """@brief Saving a Python data structure to a binary JData (BJData/UBJSON) file
+    """
+    Save a Python data structure to a binary BJData/UBJSON JData file.
 
-    @param[in] data: data to be saved
-    @param[in] fname: a binary (BJData/UBJSON based) JData file name
-    @param[in] opt: options, if opt['encode']=True or 1 (default), call jdata.encode() before saving
+    Requires the 'bjdata' package to be installed.
+
+    Args:
+        data: The Python data structure to save.
+        fname (str): Output file path (.bjd, .ubj, .bnii, etc.).
+        opt (dict, optional): Legacy options dict merged into kwargs.
+        **kwargs: Options including:
+            encode (bool): If True (default), call jdata.encode() before saving.
+            islittle (bool): If True, use little-endian byte order.
+
+    Returns:
+        None
+
+    Raises:
+        ImportError: If the bjdata module is not installed.
     """
     if opt is None:
         opt = {}
@@ -482,10 +604,22 @@ def saveb(data, fname, opt=None, **kwargs):
 
 
 def jsoncache(url, opt=None, **kwargs):
-    """@brief Printing the local folder and file name where a linked data file in the URL to be saved
+    """
+    Compute the local cache folder and filename for a given URL.
 
-    @param[in] url: a URL
-    @param[in] opt: options, if opt['decode']=True or 1 (default), call jdata.decode() before saving
+    Determines where a downloaded file should be cached based on the URL pattern.
+    For NeuroJSON.io URLs, uses a structured folder hierarchy. For other URLs,
+    uses SHA-256 hashing of the URL for the filename.
+
+    Args:
+        url (str): The URL to compute cache info for.
+        opt (dict, optional): Legacy options dict merged into kwargs.
+        **kwargs: Additional options.
+
+    Returns:
+        tuple: (cachepath, filename) where cachepath is a list of candidate cache
+            directories or a single path if the file is already cached, and
+            filename is the cache filename.
     """
 
     if opt is None:
@@ -596,17 +730,26 @@ def jsoncache(url, opt=None, **kwargs):
 
 
 def jdlink(uripath, opt=None, **kwargs):
-    """@brief Printing the local folder and file name where a linked data file in the URL to be saved
+    """
+    Download and cache externally linked data files referenced by _DataLink_ URLs.
 
-    newdata, fname, cachepath = jdlink(uripath, showlink=True, showsize=True, regex=None, nocache=False, **kwargs)
+    Processes a single URL or list of URLs (typically extracted via jsonpath from
+    a loaded dataset). Downloads files, caches them locally, and optionally parses
+    JData-formatted files.
 
-    @param[in] uripath: a URL
-    @param[in] opt: options, if opt['decode']=True or 1 (default), call jdata.decode() before saving
-    showlink: print URL
-    showsize: print file size if URL contains the size info
-    downloadonly: only download the file, do not parse
-    regex: a regular expression string, used to filter uripath list
-    nocache: redownload and ignore the cached files
+    Args:
+        uripath (str or list): A single URL string or a list of URL strings to download.
+        opt (dict, optional): Legacy options dict merged into kwargs.
+        **kwargs: Options including:
+            regex (str): Filter URLs matching this regular expression pattern.
+            showlink (bool): If True, print URLs during download.
+            showsize (bool): If True, print total download size.
+            downloadonly (bool): If True, download without parsing.
+            nocache (bool): If True, re-download ignoring cached files.
+
+    Returns:
+        tuple: (data, filename, cachepath) for a single URL, or lists of each
+            for multiple URLs.
     """
 
     if opt is None:
@@ -650,12 +793,22 @@ def jdlink(uripath, opt=None, **kwargs):
 
 def downloadlink(uripath, opt=None, **kwargs):
     """
-    newdata, fname, cachepath = downloadlink(urlpath, showlink=True, nocache=False, **kwargs)
+    Download a single URL and return parsed data with cache path info.
 
-    @param[in] uripath: a list of URLs or a single URL as a string
-    @param[in] showlink: print the URL when downloading each file
-    @param[in] nocache: when True, redownload the data instead of using locally cached files
-    kwargs: additional parameters passing to loadjd()
+    Low-level function called by jdlink() and load(). Handles downloading,
+    caching, and optional parsing of the downloaded content.
+
+    Args:
+        uripath (str): The URL to download.
+        opt (dict, optional): Legacy options dict merged into kwargs.
+        **kwargs: Options including:
+            showlink (bool): If True, print URL when downloading.
+            nocache (bool): If True, re-download without caching.
+            downloadonly (bool): If True, download without parsing.
+
+    Returns:
+        tuple: (data, filename, cachepath) where data is the parsed content
+            (or None), filename is the local path, and cachepath is the cache info.
     """
     if opt is None:
         opt = {}
@@ -703,35 +856,109 @@ def downloadlink(uripath, opt=None, **kwargs):
 
 
 def loadjson(fname, **kwargs):
+    """
+    Load a text-based JSON file. Alias for loadt().
+
+    Args:
+        fname (str): Path to the JSON file.
+        **kwargs: Options passed to loadt().
+
+    Returns:
+        The loaded data structure.
+    """
     return loadt(fname, **kwargs)
 
 
 def savejson(fname, **kwargs):
+    """
+    Save data to a text-based JSON file. Alias for savet().
+
+    Args:
+        fname (str): Output JSON file path.
+        **kwargs: Options passed to savet().
+
+    Returns:
+        None
+    """
     return savet(fname, **kwargs)
 
 
 def loadbj(fname, **kwargs):
+    """
+    Load a binary BJData file. Alias for loadb().
+
+    Args:
+        fname (str): Path to the BJData file.
+        **kwargs: Options passed to loadb().
+
+    Returns:
+        The loaded data structure.
+    """
     return loadb(fname, **kwargs)
 
 
 def savebj(fname, **kwargs):
+    """
+    Save data to a binary BJData file. Alias for saveb().
+
+    Args:
+        fname (str): Output BJData file path.
+        **kwargs: Options passed to saveb().
+
+    Returns:
+        None
+    """
     return saveb(fname, **kwargs)
 
 
 def loadubjson(*varargin, **kwargs):
+    """
+    Load a UBJSON file (big-endian BJData). Alias for loadbj() with endian='B'.
+
+    Args:
+        *varargin: Positional arguments passed to loadbj().
+        **kwargs: Options passed to loadbj().
+
+    Returns:
+        The loaded data structure.
+    """
     # Set default endian for UBJSON (big-endian)
     kwargs["endian"] = "B"
     return loadbj(*varargin, **kwargs)
 
 
 def saveubjson(*varargin, **kwargs):
+    """
+    Save data to a UBJSON file (big-endian BJData). Alias for savebj() with endian='B'.
+
+    Args:
+        *varargin: Positional arguments passed to savebj().
+        **kwargs: Options passed to savebj().
+
+    Returns:
+        None
+    """
     # Set default endian for UBJSON (big-endian)
     kwargs["endian"] = "B"
     return savebj(*varargin, **kwargs)
 
 
 def loadmsgpack(filename: str, **kwargs):
-    """Load MessagePack files"""
+    """
+    Load a MessagePack (.msgpack) file into a Python data structure.
+
+    Requires the 'msgpack' package.
+
+    Args:
+        filename (str): Path to the MessagePack file.
+        **kwargs: Options passed to msgpack.unpack().
+
+    Returns:
+        The deserialized Python data structure.
+
+    Raises:
+        ValueError: If the msgpack module is not installed.
+    """
     try:
         import msgpack
 
@@ -745,7 +972,23 @@ def loadmsgpack(filename: str, **kwargs):
 
 
 def savemsgpack(data, filename: str, **kwargs):
-    """Save MessagePack files"""
+    """
+    Save a Python data structure to a MessagePack (.msgpack) file.
+
+    Requires the 'msgpack' package.
+
+    Args:
+        data: The Python data structure to save.
+        filename (str): Output file path.
+        **kwargs: Options passed to msgpack.packb().
+
+    Returns:
+        None
+
+    Raises:
+        TypeError: If the data cannot be serialized.
+        OSError: If the file cannot be written.
+    """
     try:
         import msgpack
 
@@ -785,43 +1028,24 @@ def loadmat(filename, **kwargs):
 
 def loadjd(filename: str, suffix=None, **kwargs):
     """
-    Parse a hierarchical container data file, including JSON,
-    binary JSON (BJData/UBJSON/MessagePack) and HDF5, and output
-    the parsed data in a Python data structure
+    Load a JData file in any supported format based on file extension.
 
-    author: Qianqian Fang (q.fang <at> neu.edu)
+    Unified loading interface that dispatches to the appropriate loader
+    (loadt, loadb, loadh5, loadnifti, loadgifti, load_csv_tsv, etc.)
+    based on the file extension.
 
     Args:
-        filename: the input hierarchical container data file, supporting:
-                *.json,.jnii,.jdt,.jmsh,.jnirs,.jbids: JSON/JData based data files, see https://neurojson.org/jdata/draft3
-                *.bjd,.bnii,.jdb,.bmsh,.bnirs,.pmat: binary JData (BJData) files, see https://neurojson.org/bjdata/draft3
-                *.ubj: UBJSON-encoded files, see http://ubjson.org
-                *.msgpack: MessagePack-encoded files, see http://msgpack.org
-                *.h5,.hdf5,.snirf,.nwb: HDF5 files, handled in jdata.h5
-                *.nii,.nii.gz,.img,.img.gz: NIfTI files, handled in jdata.jnifti
-                *.tsv,.tsv.gz,.csv,.csv.gz: TSV/CSV files, handled in jdata.csv
-                *.bval,.bvec: EEG .bval and .bvec files
-                *.mat: MATLAB/Octave .mat files
-        **varargin: optional keyword arguments for different file types:
-                - for JSON/JData files, these are optional parameters supported by jdata.load()
-                - for BJData/UBJSON/MessagePack files, these are options supported by jdata.load()
-                - for HDF5 files, these are options supported by jdata.loadh5()
+        fname (str): Path to the input file. Supported extensions include
+            .json, .jnii, .bjd, .ubj, .bnii, .h5, .snirf, .nii, .nii.gz,
+            .gii, .csv, .tsv, .mat, .msgpack, and more.
+        opt (dict, optional): Legacy options dict merged into kwargs.
+        **kwargs: Format-specific options passed to the underlying loader.
 
     Returns:
-        data: a dictionary structure (array) or list (array) storing the hierarchical data
-              in the container data file
-        mmap: (optional) output storing the JSON/binary JSON memory-map table for fast
-              disk access. Available for JSON/binary JSON files when requested.
+        The loaded data structure (dict, list, numpy array, etc.).
 
-    Examples:
-        obj = {'string': 'value', 'array': [1, 2, 3]}
-        jd.save(obj, 'datafile.json')
-        newobj = jd.loadjd('datafile.json')
-
-    License:
-        BSD or GPL version 3, see LICENSE_{BSD,GPLv3}.txt files for details
-
-    This function is part of JSONLab toolbox (http://iso2mesh.sf.net/cgi-bin/index.cgi?jsonlab)
+    Raises:
+        Exception: If the file extension is not recognized.
     """
 
     if not filename:
@@ -891,6 +1115,24 @@ def loadjd(filename: str, suffix=None, **kwargs):
 
 
 def savejd(data, filename, suffix=None, **kwargs):
+    """
+    Save a Python data structure to a JData file in any supported format.
+
+    Unified saving interface that dispatches to the appropriate saver
+    (savet, saveb, saveh5, savenifti, savegifti, etc.) based on file extension.
+
+    Args:
+        data: The Python data structure to save.
+        fname (str): Output file path. The format is determined by the extension.
+        opt (dict, optional): Legacy options dict merged into kwargs.
+        **kwargs: Format-specific options passed to the underlying saver.
+
+    Returns:
+        None
+
+    Raises:
+        Exception: If the file extension is not recognized.
+    """
     if not filename:
         raise ValueError("you must provide file name")
 

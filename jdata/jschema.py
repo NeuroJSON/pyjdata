@@ -44,20 +44,34 @@ _BINTYPES = {
 
 def jsonschema(data: Any, schema: Any = None, **kwargs) -> Union[Tuple[bool, List[str]], Any]:
     """
-    Validate data against JSON Schema or generate data from schema.
+    Validate data against JSON Schema, generate data from schema, or extract subschemas.
+
+    Multi-purpose function supporting three modes of operation:
+      - Validation: jsonschema(data, schema) -> (valid, errors)
+      - Generation: jsonschema(schema, generate='all') -> generated_data
+      - Subschema: jsonschema(schema, getsubschema='$.path') -> subschema
+
+    Compatible with JSON Schema draft-07.
 
     Args:
-        data: Data to validate, or schema if generating
-        schema: JSON Schema (dict, JSON string, file path, or URL)
-        **kwargs:
-            rootschema: Root schema for resolving $ref
-            generate: Generation mode - 'all', 'required', 'requireddefaults'
-            getsubschema: Get subschema at JSONPath
+        data: For validation, the data to validate. For generation, the schema.
+        schema: The JSON Schema (dict, JSON string, file path, or URL).
+            Use None for generation or subschema extraction mode.
+        **kwargs: Mode-specific options:
+            rootschema (dict): Root schema for resolving $ref references.
+            generate (str): Generation mode - 'all', 'required', or 'requireddefaults'.
+            getsubschema (str): JSONPath to extract a subschema at that path.
 
     Returns:
-        For validation: (valid, errors) tuple
-        For generation: generated data (not a tuple)
-        For getsubschema: the subschema (not a tuple)
+        For validation: tuple (bool, list) - (is_valid, error_messages).
+        For generation: The generated data structure matching the schema.
+        For getsubschema: The subschema dict at the given path.
+
+    Examples:
+        >>> jsonschema(5, {'type': 'integer'})
+        (True, [])
+        >>> jsonschema({'type': 'string', 'default': 'hello'}, generate='all')
+        'hello'
     """
     if "resolveref" in kwargs:
         return _resolveref(kwargs["resolveref"], data)
@@ -810,7 +824,20 @@ def _getsubschema(schema: dict, jsonpath: str) -> Optional[dict]:
 
 
 def coerce(data: Any, schema: dict) -> Any:
-    """Coerce data to match schema's binType. For use before assignment."""
+    """
+    Coerce data to match a schema's binType specification.
+
+    If the schema defines a 'binType' (e.g., 'uint8', 'float32'), converts the
+    input data to a numpy array with the corresponding dtype.
+
+    Args:
+        data: The data to coerce (scalar, list, or numpy array).
+        schema (dict): A JSON Schema dict, optionally containing 'binType'.
+
+    Returns:
+        The coerced data as a numpy array if binType is specified and conversion
+        succeeds, otherwise the original data unchanged.
+    """
     if not isinstance(schema, dict) or "binType" not in schema:
         return data
     dtype = _BINTYPES.get(schema["binType"])

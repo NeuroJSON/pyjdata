@@ -6,7 +6,7 @@ with open("README.md", "r") as fh:
 setup(
     name="jdata",
     packages=["jdata"],
-    version="0.9.4",
+    version="0.9.3",
     license="Apache license 2.0",
     description="JSON/binary JSON formats for exchanging Python and Numpy data",
     long_description=readme,
@@ -33,7 +33,6 @@ setup(
         "Development Status :: 4 - Beta",
         "Intended Audience :: Developers",
         "Topic :: Software Development :: Libraries :: Python Modules",
-        "License :: OSI Approved :: Apache Software License",
         "Programming Language :: Python :: 2.7",
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.4",

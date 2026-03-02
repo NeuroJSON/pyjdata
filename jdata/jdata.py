@@ -86,17 +86,41 @@ _allownumpy = ("_ArraySize_", "_ArrayData_", "_ArrayZipSize_", "_ArrayZipData_")
 
 
 def encode(d, opt=None, **kwargs):
-    """@brief Encoding a Python data structure to portable JData-annotated dict constructs
+    """
+    Encode a Python data structure to portable JData-annotated dict constructs.
 
-    This function converts complex data types (usually not JSON-serializable) into
-    portable JData-annotated dict/list constructs that can be easily exported as JSON/JData
-    files
+    Converts complex data types (numpy arrays, complex numbers, special floats)
+    into JData-annotated dict/list constructs that can be serialized as JSON or
+    binary JSON. Scalar types (int, float, str, bool, None) pass through unchanged.
 
-    @param[in,out] d: an arbitrary Python data
-    @param[in] opt: options, can contain a dict with the following keys
-         'compression': choose one of ['zlib','lzma','gzip','lz4','blosc2blosclz','blosc2lz4',
-                        'blosc2lz4hc','blosc2zlib','blosc2zstd'] for compression codec, default is None
-         'nthread': number of compression thread of the codec is of the blosc2 class, default is 1
+    Args:
+        d: An arbitrary Python data structure to encode. Supported types include
+            float, int, str, bool, None, list, tuple, set, frozenset, dict,
+            complex, numpy.ndarray, and nested combinations thereof.
+        opt (dict, optional): Legacy options dict. If provided, its contents are
+            merged into kwargs. Prefer passing options as keyword arguments directly.
+        **kwargs: Encoding options including:
+            compression (str): Compression codec for numpy arrays. One of 'zlib',
+                'gzip', 'lzma', 'lz4', 'base64', or blosc2 variants. Default 'zlib'.
+            compressarraysize (int): Minimum array size (in elements) to trigger
+                compression. Default 200.
+            base64 (bool): If True, base64-encode compressed data for text JSON.
+            inplace (bool): If True, make deep copies to avoid mutating input.
+
+    Returns:
+        The JData-annotated version of the input. Numpy arrays become dicts with
+        keys like '_ArrayType_', '_ArraySize_', '_ArrayData_' (or '_ArrayZipData_'
+        if compressed). Special floats become '_NaN_', '_Inf_', '-_Inf_'. Other
+        types pass through or are recursively encoded.
+
+    Examples:
+        >>> import numpy as np
+        >>> encode(float('nan'))
+        '_NaN_'
+        >>> encode(np.array([1, 2, 3], dtype=np.uint8))
+        {'_ArrayType_': 'uint8', '_ArraySize_': [3], '_ArrayData_': ...}
+        >>> encode({'a': [1, 2], 'b': np.zeros(3)})
+        {'a': [1, 2], 'b': {'_ArrayType_': 'double', ...}}
     """
     if opt is None:
         opt = {}
@@ -238,14 +262,30 @@ def encode(d, opt=None, **kwargs):
 
 
 def decode(d, opt=None, **kwargs):
-    """@brief Decoding a JData-annotated dict construct into native Python data
+    """
+    Decode JData-annotated dict constructs back into native Python data.
 
-    This function converts portable JData-annotated dict/list constructs back to native Python
-    data structures
+    Reverses the encoding performed by encode(). Recognizes JData annotation keys
+    ('_ArrayType_', '_ArraySize_', '_ArrayData_', '_ArrayZipData_', etc.) and
+    reconstructs numpy arrays, complex numbers, and special float values.
 
-    @param[in,out] d: an arbitrary Python data, any JData-encoded components will be decoded
-    @param[in] opt: options, can contain a dict with the following keys
-         'nthread': number of decompression thread of the codec is of the blosc2 class, default is 1
+    Args:
+        d: A JData-annotated Python data structure (dict, list, or scalar).
+        opt (dict, optional): Legacy options dict merged into kwargs.
+        **kwargs: Decoding options including:
+            base64 (bool): If True, expect base64-encoded compressed data.
+            inplace (bool): If True, make deep copies to avoid mutating input.
+            maxlinklevel (int): Maximum depth for resolving '_DataLink_' references.
+
+    Returns:
+        The decoded native Python data structure with numpy arrays, complex numbers,
+        and special floats restored.
+
+    Examples:
+        >>> decode('_NaN_')
+        nan
+        >>> decode({'_ArrayType_': 'uint8', '_ArraySize_': [3], '_ArrayData_': [1, 2, 3]})
+        array([1, 2, 3], dtype=uint8)
     """
 
     if opt is None:
@@ -403,6 +443,20 @@ def decode(d, opt=None, **kwargs):
 
 
 def jsonfilter(obj):
+    """
+    JSON serialization fallback handler for non-serializable Python types.
+
+    Intended for use as the 'default' parameter of json.dumps(). Converts numpy
+    types, bytes, and special floats to JSON-compatible representations.
+
+    Args:
+        obj: A Python object that is not natively JSON-serializable.
+
+    Returns:
+        A JSON-serializable equivalent: numpy arrays become lists, numpy scalars
+        become Python scalars, bytes become UTF-8 strings, NaN/Inf become JData
+        string annotations. Returns None if the type is not handled.
+    """
     if type(obj) == "long":
         return str(obj)
     elif type(obj).__module__ == np.__name__:
@@ -423,6 +477,19 @@ def jsonfilter(obj):
 
 
 def encodedict(d0, **kwargs):
+    """
+    Encode all values in a dict using JData annotations.
+
+    Iterates over key-value pairs and recursively calls encode() on each.
+    Keys that are themselves non-string types are also encoded.
+
+    Args:
+        d0 (dict): The input dictionary to encode.
+        **kwargs: Options passed through to encode() for each value.
+
+    Returns:
+        dict: A new dictionary with all values JData-encoded.
+    """
     d = dict(d0)
     for k, v in d0.items():
         if isinstance(v, np.ndarray) and isinstance(k, str) and (k in _allownumpy):
@@ -438,6 +505,19 @@ def encodedict(d0, **kwargs):
 
 
 def encodelist(d0, **kwargs):
+    """
+    Encode all elements in a list using JData annotations.
+
+    Iterates over list elements and recursively calls encode() on each.
+
+    Args:
+        d0 (list): The input list to encode.
+        **kwargs: Options passed through to encode() for each element.
+            inplace (bool): If True, deep-copy elements before encoding.
+
+    Returns:
+        list: A new list with all elements JData-encoded.
+    """
     if kwargs.get("inplace", False):
         d = [copy.deepcopy(x) if not isinstance(x, np.ndarray) else x for x in d0]
     else:
@@ -451,6 +531,18 @@ def encodelist(d0, **kwargs):
 
 
 def decodedict(d0, **kwargs):
+    """
+    Decode all values in a JData-annotated dict back to native types.
+
+    Iterates over key-value pairs and recursively calls decode() on each value.
+
+    Args:
+        d0 (dict): The input JData-annotated dictionary.
+        **kwargs: Options passed through to decode() for each value.
+
+    Returns:
+        dict: A new dictionary with all values decoded to native Python types.
+    """
     d = dict(d0)
     for k, v in d.items():
         newkey = encode(k, **kwargs)
@@ -464,6 +556,19 @@ def decodedict(d0, **kwargs):
 
 
 def decodelist(d0, **kwargs):
+    """
+    Decode all elements in a JData-annotated list back to native types.
+
+    Iterates over list elements and recursively calls decode() on each.
+
+    Args:
+        d0 (list): The input JData-annotated list.
+        **kwargs: Options passed through to decode() for each element.
+            inplace (bool): If True, deep-copy elements before decoding.
+
+    Returns:
+        list: A new list with all elements decoded to native Python types.
+    """
     if kwargs.get("inplace", False):
         d = [copy.deepcopy(x) if not isinstance(x, np.ndarray) else x for x in d0]
     else:
@@ -477,6 +582,15 @@ def decodelist(d0, **kwargs):
 
 
 def zlibencode(buf):
+    """
+    Compress a bytes buffer using zlib.
+
+    Args:
+        buf (bytes): Raw byte data to compress.
+
+    Returns:
+        bytes: Zlib-compressed data.
+    """
     return zlib.compress(buf)
 
 
@@ -484,6 +598,15 @@ def zlibencode(buf):
 
 
 def gzipencode(buf):
+    """
+    Compress a bytes buffer using gzip format.
+
+    Args:
+        buf (bytes): Raw byte data to compress.
+
+    Returns:
+        bytes: Gzip-compressed data.
+    """
     gzipper = zlib.compressobj(wbits=(zlib.MAX_WBITS | 16))
     newbuf = gzipper.compress(buf)
     newbuf += gzipper.flush()
@@ -494,6 +617,15 @@ def gzipencode(buf):
 
 
 def lzmaencode(buf):
+    """
+    Compress a bytes buffer using LZMA (FORMAT_ALONE).
+
+    Args:
+        buf (bytes): Raw byte data to compress.
+
+    Returns:
+        bytes: LZMA-compressed data.
+    """
     return lzma.compress(buf, lzma.FORMAT_ALONE)
 
 
@@ -501,6 +633,20 @@ def lzmaencode(buf):
 
 
 def lz4encode(buf):
+    """
+    Compress a bytes buffer using LZ4 frame format.
+
+    Requires the 'lz4' package to be installed.
+
+    Args:
+        buf (bytes): Raw byte data to compress.
+
+    Returns:
+        bytes: LZ4-compressed data.
+
+    Raises:
+        ImportError: If the lz4 module is not installed.
+    """
     try:
         import lz4.frame
     except ImportError:
@@ -515,6 +661,15 @@ def lz4encode(buf):
 
 
 def base64encode(buf):
+    """
+    Encode a bytes buffer to base64.
+
+    Args:
+        buf (bytes): Raw byte data to encode.
+
+    Returns:
+        bytes: Base64-encoded data.
+    """
     return base64.b64encode(buf)
 
 
@@ -522,6 +677,15 @@ def base64encode(buf):
 
 
 def zlibdecode(buf):
+    """
+    Decompress a zlib-compressed bytes buffer.
+
+    Args:
+        buf (bytes): Zlib-compressed byte data.
+
+    Returns:
+        bytes: Decompressed raw data.
+    """
     return zlib.decompress(buf)
 
 
@@ -529,6 +693,15 @@ def zlibdecode(buf):
 
 
 def gzipdecode(buf):
+    """
+    Decompress a gzip-compressed bytes buffer.
+
+    Args:
+        buf (bytes): Gzip-compressed byte data.
+
+    Returns:
+        bytes: Decompressed raw data.
+    """
     return zlib.decompress(bytes(buf), zlib.MAX_WBITS | 32)
 
 
@@ -536,6 +709,15 @@ def gzipdecode(buf):
 
 
 def lzmadecode(buf):
+    """
+    Decompress an LZMA-compressed bytes buffer.
+
+    Args:
+        buf (bytes): LZMA-compressed byte data.
+
+    Returns:
+        bytes: Decompressed raw data.
+    """
     newbuf = bytearray(buf)  # set length to -1 (unknown) if EOF appears
     newbuf[5:13] = b"\xff\xff\xff\xff\xff\xff\xff\xff"
     return lzma.decompress(newbuf, lzma.FORMAT_ALONE)
@@ -545,6 +727,20 @@ def lzmadecode(buf):
 
 
 def lz4decode(buf):
+    """
+    Decompress an LZ4-compressed bytes buffer.
+
+    Requires the 'lz4' package to be installed.
+
+    Args:
+        buf (bytes): LZ4-compressed byte data.
+
+    Returns:
+        bytes: Decompressed raw data.
+
+    Raises:
+        ImportError: If the lz4 module is not installed.
+    """
     try:
         import lz4.frame
     except ImportError:
@@ -559,6 +755,15 @@ def lz4decode(buf):
 
 
 def base64decode(buf):
+    """
+    Decode a base64-encoded bytes buffer.
+
+    Args:
+        buf (bytes): Base64-encoded byte data.
+
+    Returns:
+        bytes: Decoded raw data.
+    """
     return base64.b64decode(buf)
 
 

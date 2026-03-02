@@ -19,6 +19,37 @@ import copy
 
 
 def jsonpath(root, jpath, opt=None):
+    """
+    Query or traverse a nested dict/list structure using JSONPath expressions.
+
+    Implements a subset of the JSONPath specification
+    (https://goessner.net/articles/JsonPath/) for querying hierarchical data.
+
+    Args:
+        data: The root data structure (dict or list) to query.
+        jpath (str): A JSONPath expression string. Supported syntax includes:
+            '$'          - root object
+            '.key'       - child by name
+            '..key'      - recursive descent (deep scan)
+            '[n]'        - array index (0-based)
+            '[start:end]'- array slice
+            '[-n]'       - negative index (from end)
+            '[*]'        - wildcard (all elements)
+            '["key"]'    - bracket notation for keys with special characters
+        opt (dict, optional): Options including:
+            inplace (bool): If True, return deep copies of matched results.
+
+    Returns:
+        The matched value(s). Returns a single value for direct key access,
+        or a list for deep scans, wildcards, and slices.
+
+    Examples:
+        >>> data = {'store': {'book': [{'title': 'A'}, {'title': 'B'}]}}
+        >>> jsonpath(data, '$.store.book[0].title')
+        'A'
+        >>> jsonpath(data, '$..title')
+        ['A', 'B']
+    """
     if opt is None:
         opt = {}
     obj = root

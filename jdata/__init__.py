@@ -60,7 +60,7 @@ from .jschema import *
 from .njprep import *
 from .neurojson import *
 
-__version__ = "0.9.4"
+__version__ = "0.9.3"
 __all__ = (
     jdata.__all__
     + jfile.__all__
