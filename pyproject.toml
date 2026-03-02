@@ -7,7 +7,7 @@ name = "jdata"
 version = "0.9.4"
 description = "JSON/binary JSON formats for exchanging Python and Numpy data"
 readme = "README.md"
-license = "Apache-2.0"
+license = {text = "Apache-2.0"}
 authors = [
     { name = "Qianqian Fang", email = "fangqq@gmail.com" },
 ]
