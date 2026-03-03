@@ -103,7 +103,7 @@ def load(fname, opt=None, **kwargs):
     if re.match("^https*://", fname):
         newdata, fname, _ = downloadlink(fname, opt, **kwargs)
         if newdata:
-            return newdata[0]
+            return newdata
 
     spl = os.path.splitext(fname)
     ext = spl[1].lower()
