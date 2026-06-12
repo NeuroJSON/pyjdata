@@ -71,13 +71,9 @@ def nii2jnii(filename, format="jnii", *varargin, **kwargs):
         fileinfo = os.stat(hdrfile)
         if fileinfo.st_size == 0:
             raise ValueError("specified file does not exist")
-        header = mmap.mmap(
-            hdrfile,
-            0,
-            access=mmap.ACCESS_READ,
-            format=niftiheader[: (fileinfo.st_size < 352)],
-        )
-        nii = {"hdr": header[0]}
+        with open(hdrfile, "rb") as finput:
+            hdrbytes = finput.read()
+        nii = {"hdr": memmapstream(hdrbytes, niftiheader)}
 
     dataendian = sys.byteorder
 
@@ -92,13 +88,7 @@ def nii2jnii(filename, format="jnii", *varargin, **kwargs):
         if "gzdata" in locals():
             nii["hdr"] = memmapstream(gzdata, niftiheader)
         else:
-            header = mmap.mmap(
-                hdrfile,
-                0,
-                access=mmap.ACCESS_READ,
-                format=niftiheader[: (fileinfo.st_size < 352)],
-            )
-            nii["hdr"] = header[0]
+            nii["hdr"] = memmapstream(hdrbytes, niftiheader)
 
     if nii["hdr"]["dim"][0] > 7:
         names = list(nii["hdr"].keys())
@@ -186,7 +176,7 @@ def nii2jnii(filename, format="jnii", *varargin, **kwargs):
     if re.search(r"\.[Hh][Dd][Rr](\.[Gg][Zz])*$", filename):
         filename = re.sub(r"\.[Hh][Dd][Rr](\.[Gg][Zz])*$", ".img\g<1>", filename)
 
-    imgbytenum = np.prod(nii["hdr"]["dim"][1 : nii["hdr"]["dim"][0] + 1]) * nii["voxelbyte"]
+    imgbytenum = int(np.prod(nii["hdr"]["dim"][1 : nii["hdr"]["dim"][0] + 1]) * nii["voxelbyte"])
 
     if isnii == 0 and re.search(r"\.[Gg][Zz]$", filename):
         with open(filename, "rb") as finput:
@@ -1301,13 +1291,13 @@ def loadjnifti(filename, *args, **kwargs):
             jnii['NIFTIData'] - the main image data array
             jnii['NIFTIExtension'] - a list containing the extension data buffers
     """
-    if not filename.endswith((".nii", ".jnii", ".bnii")):
+    if not filename.endswith((".nii", ".nii.gz", ".jnii", ".bnii")):
         raise ValueError(
             "File suffix must be .jnii for text JNIfTI, .bnii for binary JNIfTI or .nii for NIFTI-1/2 files"
         )
 
-    if filename.endswith(".nii"):
-        nii = loadnifti(filename, **kwargs)
+    if filename.endswith((".nii", ".nii.gz")):
+        jnii = loadnifti(filename, **kwargs)
     elif filename.endswith(".jnii"):
         # Assuming loadjson is available from JSONLab
         jnii = jd.load(filename, *args, **kwargs)
