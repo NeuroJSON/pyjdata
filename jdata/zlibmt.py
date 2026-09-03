@@ -79,7 +79,8 @@ def compress(
         zlib compression level, 0-9.
     nthread : int, optional
         Worker threads; defaults to the CPU count, capped by the block count.
-        ``1`` uses plain :func:`zlib.compress`.
+        Affects only how fast the output is produced, never what it is: ``1``
+        takes the same block-wise path as ``32``.
     blocksize : int
         Bytes per independently-deflated block.  Affects the output bytes, so it
         is part of the reproducibility contract and should not be varied between
@@ -134,7 +135,7 @@ def compress(
         uncompressed += len(blocks[index])
     offsets.append([len(out), uncompressed])  # sentinel: end of the last block
     out += terminator
-    out += (zlib.adler32(bytes(view)) & 0xFFFFFFFF).to_bytes(4, "big")
+    out += (zlib.adler32(view) & 0xFFFFFFFF).to_bytes(4, "big")
     return (bytes(out), offsets) if return_offsets else bytes(out)
 
 
