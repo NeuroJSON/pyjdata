@@ -101,6 +101,30 @@ browser. `jdata.zlibmt` removes its speed penalty by deflating independent
 stream: 11.3x at 32 threads for 0.019% more bytes, byte-identical regardless of
 thread count.
 
+Decompression is parallel too, via one added annotation. DEFLATE carries no
+framing, so a decoder cannot locate block *N* without inflating everything
+before it — which is why no threaded zlib decompressor exists for streams in
+general. But the block offsets are known for free at compression time, so
+arrays written through the threaded path carry them:
+
+```json
+"_ArrayZipType_": "zlib",
+"_ArrayZipOffsets_": [[2, 0], [1401288, 4194304], [2795472, 8388608], ...]
+```
+
+`[[compressed, uncompressed], ...]`, one row per block, with a final sentinel
+row closing the last one — 444 bytes of JSON for an 80 MB payload. The
+compressed bytes are untouched, so any reader that ignores the key decodes the
+stream normally; a reader that honours it inflates the blocks concurrently into
+disjoint slices of one preallocated buffer (3.1x at 32 threads, 197 → 620
+MB/s). An index that does not describe the stream is rejected and the reader
+falls back to a serial inflate, so a stale or corrupt index can cost time but
+never correctness.
+
+The key is emitted only when `nthread` was requested and the payload spans more
+than one block, which keeps small header fields unannotated and documents that
+never asked for threading byte-identical to before.
+
 ### 1.5 Content hashes
 
 Taken from the git-annex key whenever one is available — an `MD5E` or `SHA256E`
