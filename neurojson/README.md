@@ -6,7 +6,8 @@ pipeline, kept in this repository so that changes to them are reviewable and
 diffable.
 
 ```
-design/qq/               CouchDB design document for the version-invariant schema
+SCHEMA.md                conversion rules, output schema, view/handler changes
+design/qq/               CouchDB design document
 design/frozen/           the design document as deployed for the legacy
                          `openneuro` database, kept verbatim for diffing
 simulate.js              runs design-document JavaScript outside CouchDB
