@@ -336,7 +336,11 @@ def encode(d, opt=None, **kwargs):
                 rawbytes = arraydata.astype(np.float64).tobytes()
                 newobj["_ArrayZipType_"] = opt["compression"]
                 newobj["_ArrayZipSize_"] = [nrows, nnz]
-                newobj["_ArrayZipData_"] = _compress_data(rawbytes, opt)
+                newobj["_ArrayZipData_"], zipoffsets = _compress_data(
+                    rawbytes, opt, return_offsets=True
+                )
+                if zipoffsets and len(zipoffsets) > 2:
+                    newobj["_ArrayZipOffsets_"] = zipoffsets
                 if (("base64" in opt) and (opt["base64"])) or opt["compression"] == "base64":
                     newobj["_ArrayZipData_"] = base64.b64encode(newobj["_ArrayZipData_"])
                 newobj.pop("_ArrayData_")

@@ -360,6 +360,34 @@ class TestZipOffsetsInJdata(unittest.TestCase):
             back = self.jd.load(fname, nthread=8)
         self.assertTrue(np.array_equal(back["v"], self.array))
 
+    def test_sparse_arrays_are_indexed_too(self):
+        # the decoder honours the key in both the sparse and dense branches, so
+        # the encoder has to emit it in both
+        import scipy.sparse
+
+        m = scipy.sparse.random(2000, 2000, density=0.3, format="csc", random_state=1)
+        rec = self.jd.encode(
+            {"m": m}, compression="zlib", compressarraysize=0, nthread=8
+        )["m"]
+        self.assertIn("_ArrayZipOffsets_", rec)
+        for nthread in (1, 16):
+            back = self.jd.decode({"m": rec}, nthread=nthread)["m"]
+            self.assertEqual(abs(back - m).max(), 0, nthread)
+
+    def test_a_raw_byte_buffer_is_indexed_as_a_uint8_array(self):
+        # general buffers reach the same path once viewed as a uint8 array,
+        # which is how JData represents an opaque blob anyway
+        buf = os.urandom(12 << 20)
+        rec = self.jd.encode(
+            {"b": np.frombuffer(buf, dtype=np.uint8)},
+            compression="zlib",
+            compressarraysize=0,
+            nthread=8,
+        )["b"]
+        self.assertIn("_ArrayZipOffsets_", rec)
+        back = self.jd.decode({"b": rec}, nthread=8)["b"]
+        self.assertEqual(back.tobytes(), buf)
+
     def test_survives_a_bjdata_round_trip(self):
         # binary JData: the index travels as a normal integer array
         encoded = self.jd.encode(
