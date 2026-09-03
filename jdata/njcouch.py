@@ -241,6 +241,37 @@ class CouchDB:
             raise CouchError(status, payload, path)
         return payload
 
+    def put_doc(self, db, docid, doc, rev=None):
+        """Write a document with a plain PUT, preserving ``_rev``.
+
+        Dataset digests must never take this path -- they go through the update
+        handler, which owns ``_rev`` resolution and the timestamp metadata.  This
+        exists for *configuration* documents in databases that have no such
+        handler, the ``sys/registry`` entry being the case that matters: it is a
+        shared document listing every database the search layer should index, so
+        it has to be read, amended and written back at the revision it was read
+        at, or a concurrent edit is silently discarded.
+        """
+        path = "/%s/%s" % (
+            urllib.parse.quote(db, safe=""),
+            urllib.parse.quote(docid, safe=""),
+        )
+        body = dict(doc)
+        if rev is None:
+            rev = body.get("_rev")
+        if rev is None:
+            status, current = self.request("GET", path)
+            if status == 200:
+                rev = current.get("_rev")
+        if rev:
+            body["_rev"] = rev
+        else:
+            body.pop("_rev", None)
+        status, payload = self.request("PUT", path, body=body)
+        if status not in (200, 201, 202):
+            raise CouchError(status, payload, path)
+        return payload
+
     def delete_doc(self, db, docid, rev=None):
         if rev is None:
             rev = self.get_doc(db, docid)["_rev"]

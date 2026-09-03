@@ -389,3 +389,39 @@ class TestLivePushSemantics(unittest.TestCase):
         self.assertEqual(links[0]["key"][1], ".nii.gz")
         self.assertEqual(links[0]["value"]["algo"], "sha256")
         self.assertEqual(links[0]["value"]["hash"], "b" * 64)
+
+
+class TestPutDocIsSeparateFromPush(unittest.TestCase):
+    """Configuration documents take a different path from dataset digests."""
+
+    def setUp(self):
+        self.rec = _Recorder()
+        self._orig = urllib.request.urlopen
+        urllib.request.urlopen = self.rec
+        self.couch = CouchDB("http://example.invalid:5984", user="u", password="p", retries=0)
+
+    def tearDown(self):
+        urllib.request.urlopen = self._orig
+
+    def test_put_doc_preserves_a_supplied_rev(self):
+        self.couch.put_doc("sys", "registry", {"_rev": "58-abc", "database": []})
+        call = self.rec.calls[-1]
+        self.assertEqual(call["method"], "PUT")
+        self.assertEqual(json.loads(call["body"])["_rev"], "58-abc")
+
+    def test_put_doc_fetches_rev_when_not_supplied(self):
+        url = "http://example.invalid:5984/sys/registry"
+        self.rec.responses[("GET", url)] = (200, {"_id": "registry", "_rev": "9-zzz"})
+        self.couch.put_doc("sys", "registry", {"database": []})
+        self.assertEqual([c["method"] for c in self.rec.calls], ["GET", "PUT"])
+        self.assertEqual(json.loads(self.rec.calls[-1]["body"])["_rev"], "9-zzz")
+
+    def test_put_doc_omits_rev_for_a_new_document(self):
+        url = "http://example.invalid:5984/sys/newdoc"
+        self.rec.responses[("GET", url)] = (404, {"error": "not_found"})
+        self.couch.put_doc("sys", "newdoc", {"a": 1})
+        self.assertNotIn("_rev", json.loads(self.rec.calls[-1]["body"]))
+
+    def test_dataset_push_still_never_uses_put(self):
+        self.couch.push("openneuro_full", "ds000001", {"a": 1})
+        self.assertEqual([c["method"] for c in self.rec.calls], ["POST"])

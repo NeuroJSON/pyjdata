@@ -27,7 +27,7 @@ import urllib.parse
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from .njcas import CAS
-from .njbids import bids2json, canonical_json
+from .njbids import NJBIDS_DEFAULT, bids2json, canonical_json
 
 __all__ = ["main", "convert_dataset", "dataset_outdir"]
 
@@ -241,8 +241,18 @@ def cmd_convert(args):
     return 1 if bad else 0
 
 
-def _iter_published(outputroot, names=None):
-    """Yield ``(dsname, version, docpath, splitpaths)`` for each latest version."""
+#: files in a version directory that are not documents to publish
+NON_DOCUMENT_FILES = ("doc.json", "meta.json", "datacite.json")
+
+
+def _iter_published(outputroot, names=None, split_names=None):
+    """Yield ``(dsname, version, docpath, splitpaths)`` for each latest version.
+
+    Split documents are recognised by name against the known split directories,
+    not by "any .json that is not doc.json".  The loose test previously picked up
+    the DataCite record written alongside the document and tried to publish it as
+    a derivatives document.
+    """
     for dsname in sorted(names or os.listdir(outputroot)):
         dsdir = os.path.join(outputroot, dsname)
         latest = os.path.join(dsdir, "latest")
@@ -253,10 +263,13 @@ def _iter_published(outputroot, names=None):
         docpath = os.path.join(vdir, "doc.json")
         if not os.path.isfile(docpath):
             continue
+        known = tuple(split_names or NJBIDS_DEFAULT["split_dirs"])
         splits = {
             name[: -len(".json")]: os.path.join(vdir, name)
             for name in sorted(os.listdir(vdir))
-            if name.endswith(".json") and name not in ("doc.json", "meta.json")
+            if name.endswith(".json")
+            and name not in NON_DOCUMENT_FILES
+            and name[: -len(".json")] in known
         }
         yield dsname, version, docpath, splits
 
@@ -320,27 +333,45 @@ def cmd_deploy(args):
 
     session = couch.session().get("userCtx", {})
     print("server %s as %s (roles=%s)" % (couch.url, session.get("name"), session.get("roles")))
-    if not couch.is_server_admin():
+
+    databases = [args.db] + ([args.split_db] if args.split_db else [])
+    missing = [db for db in databases if not couch.db_exists(db)]
+
+    # Server-admin rights are only needed to *create* a database.  Installing a
+    # design document and publishing documents need database-admin rights,
+    # which is a much smaller grant, so do not demand more than the run needs.
+    if missing and not couch.is_server_admin():
         print(
-            "\nERROR: this account is not a CouchDB server admin, so it cannot\n"
-            "create databases. Re-run with a server-admin credential:\n"
-            "  python3 -m jdata.njcli deploy --server URL --netrc <machine> ...\n"
-            "where ~/.netrc has an entry for <machine> with the admin login.",
+            "\nERROR: %s do(es) not exist, and this account (%s) is not a CouchDB\n"
+            "server admin, so it cannot create databases. Either create them with a\n"
+            "server-admin credential, or ask an administrator for:\n"
+            "    curl -X PUT http://<host>/%s\n"
+            "    curl -X PUT http://<host>/%s/_security \\\n"
+            '         -d \'{"admins":{"names":["%s"],"roles":[]},"members":{"names":[],"roles":[]}}\''
+            % (
+                ", ".join(missing),
+                session.get("name"),
+                missing[0],
+                missing[0],
+                session.get("name"),
+            ),
             file=sys.stderr,
         )
         return 2
 
-    databases = [args.db] + ([args.split_db] if args.split_db else [])
     for db in databases:
-        if couch.db_exists(db):
-            info = couch.db_info(db)
-            print("  %-24s exists (%d docs)" % (db, info["doc_count"]))
-        else:
+        if db in missing:
             couch.create_db(db)
             print("  %-24s created" % db)
+        else:
+            info = couch.db_info(db)
+            print("  %-24s exists (%d docs)" % (db, info["doc_count"]))
         if args.admin:
-            couch.set_security(db, admins=args.admin, members=args.member or [])
-            print("  %-24s security: admins=%s" % (db, args.admin))
+            try:
+                couch.set_security(db, admins=args.admin, members=args.member or [])
+                print("  %-24s security: admins=%s" % (db, args.admin))
+            except CouchError as err:
+                print("  %-24s security unchanged (%s)" % (db, err.status))
 
     ddoc = design_from_dir(args.design)
     for db in databases:
@@ -368,8 +399,12 @@ def _register(couch, args, databases):
     """Add the databases to the sys/registry document.
 
     The Postgres sync discovers which databases to index by reading
-    sys/registry, so a database that is absent from it is simply never
-    searchable no matter how many documents it holds.
+    sys/registry, so a database absent from it is never searchable no matter how
+    many documents it holds.
+
+    The registry is a shared configuration document in a database with no update
+    handler, so it is read, amended and written back at the revision it was read
+    at -- rather than through the timestamp handler that dataset digests use.
     """
     from .njcouch import CouchError
 
@@ -384,23 +419,27 @@ def _register(couch, args, databases):
     for db in databases:
         if db in known:
             continue
-        entries.append(
-            {
-                "id": db,
-                "name": args.register_name or db,
-                "fullname": args.register_name or db,
-                "url": args.register_url or "",
-                "group": 1,
-                "datatype": list(args.register_datatype or []),
-            }
-        )
+        entry = {
+            "id": db,
+            "name": args.register_name or db,
+            "fullname": args.register_name or db,
+            "url": args.register_url or "",
+            "group": 1,
+            "datatype": list(args.register_datatype or []),
+            "standard": ["BIDS"],
+        }
+        entries.append(entry)
         added.append(db)
     if not added:
         print("  registry already lists %s" % ", ".join(databases))
         return
     registry["database"] = entries
-    couch.push("sys", "registry", registry, design=args.design_name)
-    print("  registry updated: added %s" % ", ".join(added))
+    try:
+        couch.put_doc("sys", "registry", registry)
+    except CouchError as err:
+        print("  registry NOT updated (%s: %s)" % (err.status, err.body))
+        return
+    print("  registry updated: added %s (now %d databases)" % (", ".join(added), len(entries)))
 
 
 def cmd_views(args):
