@@ -38,6 +38,7 @@ def load_csv_tsv(
     convert_numeric: bool = True,
     header: bool = True,
     encoding: str = "utf-8",
+    errors: str = "replace",
     **kwargs,
 ) -> Union[Dict[str, List], List[List[str]]]:
     """
@@ -50,6 +51,10 @@ def load_csv_tsv(
         convert_numeric: If True, attempt to convert numeric strings to numbers
         header: If True, treat first row as header
         encoding: File encoding (default: 'utf-8')
+        errors: Decoding error policy (default: 'replace').  Real-world BIDS
+            tables are not reliably UTF-8 -- unit columns commonly carry a
+            latin-1 micro sign in "\xb5V" -- and refusing to read such a file
+            loses the whole table over one byte.
         **kwargs: Additional arguments passed to csv.reader/DictReader
 
     Returns:
@@ -79,11 +84,26 @@ def load_csv_tsv(
     # Determine if file is compressed
     is_compressed = filename.lower().endswith(".gz")
 
-    # Open file (compressed or regular)
-    if is_compressed:
-        file_handle = gzip.open(filename, "rt", encoding=encoding)
-    else:
-        file_handle = open(filename, "r", encoding=encoding)
+    # Open file (compressed or regular).  Try the requested encoding strictly
+    # first and fall back to latin-1, which cannot fail and round-trips the
+    # single-byte characters that show up in practice (a bare 0xb5 for the
+    # micro sign in unit columns is the common case).  Decoding with
+    # errors="replace" straight away would silently turn those into U+FFFD.
+    def _open(enc, err):
+        if is_compressed:
+            return gzip.open(filename, "rt", encoding=enc, errors=err)
+        return open(filename, "r", encoding=enc, errors=err)
+
+    try:
+        file_handle = _open(encoding, "strict")
+        file_handle.read()
+        file_handle.seek(0)
+    except UnicodeDecodeError:
+        try:
+            file_handle.close()
+        except Exception:
+            pass
+        file_handle = _open("latin-1", errors)
 
     try:
         # Set up CSV reader parameters

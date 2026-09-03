@@ -132,7 +132,15 @@ class CAS:
         Use the SQLite hash memo (default True).
     """
 
-    def __init__(self, root, algo="sha256", mode="link", memo=True, commit_every=64):
+    def __init__(
+        self,
+        root,
+        algo="sha256",
+        mode="link",
+        memo=True,
+        commit_every=64,
+        busy_timeout=120.0,
+    ):
         if mode not in ("link", "symlink", "copy", "none"):
             raise ValueError("mode must be link, symlink, copy or none")
         self.root = os.path.abspath(root)
@@ -142,6 +150,7 @@ class CAS:
         self.dbpath = os.path.join(self.root, "index.sqlite")
         self._use_memo = memo
         self.commit_every = max(1, int(commit_every))
+        self.busy_timeout = float(busy_timeout)
         self._local = threading.local()
         self.stats = {
             "hashed": 0,
@@ -149,6 +158,7 @@ class CAS:
             "bytes_hashed": 0,
             "linked": 0,
             "already": 0,
+            "memo_errors": 0,
         }
         self._statlock = threading.Lock()
         os.makedirs(self.objroot, exist_ok=True)
@@ -158,6 +168,10 @@ class CAS:
     # -- memo ---------------------------------------------------------------
 
     def _init_memo(self):
+        # journal_mode is a persistent property of the database file, so it is
+        # set once, here.  Re-issuing it on every connection needs an exclusive
+        # lock, and with a wide process pool all opening the memo at once that
+        # lock is what actually serialises the pool.
         conn = sqlite3.connect(self.dbpath, timeout=60)
         try:
             conn.execute("PRAGMA journal_mode=WAL")
@@ -178,19 +192,30 @@ class CAS:
         """One SQLite connection per thread (sqlite3 objects are not shareable)."""
         conn = getattr(self._local, "conn", None)
         if conn is None:
-            conn = sqlite3.connect(self.dbpath, timeout=60)
-            conn.execute("PRAGMA journal_mode=WAL")
+            conn = sqlite3.connect(self.dbpath, timeout=self.busy_timeout)
+            conn.execute("PRAGMA busy_timeout=%d" % int(self.busy_timeout * 1000))
             conn.execute("PRAGMA synchronous=NORMAL")
             self._local.conn = conn
         return conn
 
     def memo_get(self, key):
+        """Look up a cached hash; any memo failure degrades to a cache miss.
+
+        The memo is only ever an optimisation, so no database condition -- lock
+        contention, a corrupt file, a read-only mount -- may be allowed to fail
+        a conversion.  The cost of swallowing the error is one re-hash.
+        """
         if not (self._use_memo and key):
             return None
-        row = self._conn.execute(
-            "SELECT digest, size FROM objects WHERE key=? AND algo=?",
-            (key, self.algo),
-        ).fetchone()
+        try:
+            row = self._conn.execute(
+                "SELECT digest, size FROM objects WHERE key=? AND algo=?",
+                (key, self.algo),
+            ).fetchone()
+        except sqlite3.Error:
+            with self._statlock:
+                self.stats["memo_errors"] += 1
+            return None
         return (row[0], row[1]) if row else None
 
     def memo_put(self, key, digest, size):
@@ -203,27 +228,38 @@ class CAS:
         """
         if not (self._use_memo and key):
             return
-        conn = self._conn
-        conn.execute(
-            "INSERT OR REPLACE INTO objects (key, algo, digest, size) VALUES (?,?,?,?)",
-            (key, self.algo, digest, int(size)),
-        )
-        pending = getattr(self._local, "pending", 0) + 1
-        if pending >= self.commit_every:
-            conn.commit()
-            pending = 0
-        self._local.pending = pending
+        try:
+            conn = self._conn
+            conn.execute(
+                "INSERT OR REPLACE INTO objects (key, algo, digest, size) VALUES (?,?,?,?)",
+                (key, self.algo, digest, int(size)),
+            )
+            pending = getattr(self._local, "pending", 0) + 1
+            if pending >= self.commit_every:
+                conn.commit()
+                pending = 0
+            self._local.pending = pending
+        except sqlite3.Error:
+            with self._statlock:
+                self.stats["memo_errors"] += 1
 
     def flush(self):
         conn = getattr(self._local, "conn", None)
         if conn is not None and getattr(self._local, "pending", 0):
-            conn.commit()
+            try:
+                conn.commit()
+            except sqlite3.Error:
+                with self._statlock:
+                    self.stats["memo_errors"] += 1
             self._local.pending = 0
 
     def memo_count(self):
         if not self._use_memo:
             return 0
-        return self._conn.execute("SELECT COUNT(*) FROM objects").fetchone()[0]
+        try:
+            return self._conn.execute("SELECT COUNT(*) FROM objects").fetchone()[0]
+        except sqlite3.Error:
+            return -1
 
     # -- object paths -------------------------------------------------------
 
@@ -377,7 +413,10 @@ class CAS:
         conn = getattr(self._local, "conn", None)
         if conn is not None:
             if getattr(self._local, "pending", 0):
-                conn.commit()
+                try:
+                    conn.commit()
+                except sqlite3.Error:
+                    pass
             conn.close()
             self._local.conn = None
             self._local.pending = 0

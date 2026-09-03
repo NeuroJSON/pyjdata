@@ -50,7 +50,6 @@ from . import njcas
 from . import njdigest
 from . import njbids
 from . import njcouch
-from . import njcli
 
 # Re-export all public functions from submodules
 from .jdata import *
@@ -105,7 +104,6 @@ __all__ = (
         "njdigest",
         "njbids",
         "njcouch",
-        "njcli",
     ]
 )
 

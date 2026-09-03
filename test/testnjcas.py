@@ -230,3 +230,63 @@ class TestCasPerformance(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _hammer_memo(args):
+    """Worker for the concurrency test: open the memo and put/get many keys."""
+    casroot, worker, count = args
+    cas = CAS(casroot, commit_every=8)
+    errors = 0
+    try:
+        for i in range(count):
+            key = "MD5E-s10--%032d.bin" % ((worker * count + i) % 97)
+            cas.memo_put(key, "%064d" % i, 10)
+            cas.memo_get(key)
+        cas.flush()
+        errors = cas.stats["memo_errors"]
+    finally:
+        cas.close()
+    return errors
+
+
+class TestMemoConcurrency(unittest.TestCase):
+    """The memo must survive a wide process pool.
+
+    Regression test: setting ``PRAGMA journal_mode`` on every connection needs
+    an exclusive lock, so a pool of workers all opening the store at once
+    serialised on that lock and eventually raised "database is locked" --
+    failing whole datasets over a cache write.
+    """
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.casroot = os.path.join(self.root, "cas")
+        CAS(self.casroot).close()  # create the schema once, as the pipeline does
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def test_many_processes_share_the_memo_without_lock_errors(self):
+        from concurrent.futures import ProcessPoolExecutor
+
+        workers = 16
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            results = list(pool.map(_hammer_memo, [(self.casroot, w, 60) for w in range(workers)]))
+        self.assertEqual(sum(results), 0, "memo reported lock/IO errors: %r" % results)
+        cas = CAS(self.casroot)
+        self.assertGreater(cas.memo_count(), 0)
+        cas.close()
+
+    def test_memo_failure_degrades_to_a_cache_miss(self):
+        """A broken memo must never fail a conversion."""
+        cas = CAS(self.casroot)
+        payload = os.path.join(self.root, "x.bin")
+        with open(payload, "wb") as fid:
+            fid.write(b"content")
+        cas.dbpath = os.path.join(self.root, "nonexistent-dir", "index.sqlite")
+        cas._local = __import__("threading").local()
+        digest, size = cas.digest(payload, key="MD5E-s7--" + "0" * 32 + ".bin")
+        self.assertEqual(digest, hashlib.sha256(b"content").hexdigest())
+        self.assertEqual(size, 7)
+        self.assertGreater(cas.stats["memo_errors"], 0)
+        cas.close()
