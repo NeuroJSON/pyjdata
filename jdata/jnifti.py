@@ -192,16 +192,41 @@ def nii2jnii(filename, format="jnii", *varargin, **kwargs):
                     fid.seek(int(nii["hdr"]["vox_offset"]))
                 nii["img"] = np.frombuffer(fid.read(imgbytenum), dtype=nii["datatype"])
         else:
+            # the slice used to run one byte past the payload, which leaves
+            # frombuffer a length that is not a whole number of elements
+            offset = int(nii["hdr"]["vox_offset"][0])
             nii["img"] = np.frombuffer(
-                gzdata[
-                    int(nii["hdr"]["vox_offset"][0]) : int(
-                        nii["hdr"]["vox_offset"][0] + imgbytenum + 1
-                    )
-                ],
-                dtype=nii["datatype"],
+                gzdata[offset : offset + imgbytenum], dtype=nii["datatype"]
             )
 
-    nii["img"] = nii["img"].reshape(nii["hdr"]["dim"][1 : nii["hdr"]["dim"][0] + 1])
+    shape = nii["hdr"]["dim"][1 : nii["hdr"]["dim"][0] + 1]
+    expected = int(np.prod(shape))
+    if nii["img"].size != expected:
+        # A file whose payload does not match its own header is a defect in the
+        # file, not in this reader, and it is worth saying so precisely: the
+        # bare reshape error ("cannot reshape array of size 187746824 into
+        # shape (182,218,182,26)") gives no hint that the data is short, and
+        # sends you looking in the wrong place.
+        raise ValueError(
+            "%s: NIfTI payload holds %d elements but the header declares %s = %d "
+            "(%d bytes %s than expected); the file appears %s"
+            % (
+                filename,
+                nii["img"].size,
+                "x".join(str(int(v)) for v in shape),
+                expected,
+                abs(expected - nii["img"].size) * int(nii["voxelbyte"]),
+                "fewer" if nii["img"].size < expected else "more",
+                "truncated" if nii["img"].size < expected else "over-long",
+            )
+        )
+    # NIfTI stores voxels in column-major order.  NumPy's reshape defaults to
+    # row-major, so the Python port disagreed both with the MATLAB reference
+    # (nii2jnii.m: MATLAB reshape is column-major) and with every other reader.
+    # The mistake was invisible because the write path made the matching
+    # assumption, so jdata round-tripped with itself -- while producing files
+    # other tools read wrongly, and reading their files wrongly in turn.
+    nii["img"] = nii["img"].reshape(shape, order="F")
 
     if len(varargin) > 0 and varargin[0] == "nii":
         return nii
@@ -1345,7 +1370,8 @@ def savenifti(img, filename, *args, **kwargs):
     if len(buf) not in (352, 544):
         raise ValueError(f"Incorrect nifti-1/2 header {len(buf)}")
 
-    buf += img.tobytes()
+    # column-major, to match the format (see the note in nii2jnii)
+    buf += np.asarray(img).tobytes(order="F")
 
     if len(args) > 1 and not filename:
         return buf

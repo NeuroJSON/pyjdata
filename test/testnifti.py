@@ -14,13 +14,23 @@ in the root folder.
 Copyright (c) 2019-2026 Qianqian Fang <q.fang at neu.edu>
 """
 
+import struct
+import shutil
+import tempfile
 import unittest
+
+try:
+    import nibabel  # noqa: F401
+
+    HAVE_NIBABEL = True
+except ImportError:
+    HAVE_NIBABEL = False
 import sys
 import os
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from jdata.jnifti import jnii2nii, niiheader2jnii, nifticreate
+from jdata.jnifti import savenifti, nii2jnii, jnii2nii, niiheader2jnii, nifticreate
 from jdata.jfile import loadurl
 
 import numpy as np
@@ -169,3 +179,110 @@ class Test_jnifti(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestVoxelAxisOrder(unittest.TestCase):
+    """NIfTI stores voxels in column-major order.
+
+    Regression test.  NumPy's ``reshape`` defaults to row-major, so the Python
+    port disagreed with the MATLAB reference (``nii2jnii.m`` uses MATLAB's
+    ``reshape``, which is column-major) and with every other NIfTI reader.  It
+    went unnoticed because the write path made the matching assumption, so jdata
+    round-tripped with itself perfectly -- while writing files that other tools
+    read wrongly, and reading theirs wrongly in turn.
+
+    The first test needs no external library: it builds a byte buffer whose
+    correct interpretation is known from the format alone.
+    """
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def _write_nifti1(self, shape, values, dtype=np.int16, datatype=4, bitpix=16):
+        """Write a NIfTI-1 file with a payload laid out column-major."""
+        hdr = bytearray(348)
+        struct.pack_into("<i", hdr, 0, 348)
+        struct.pack_into("<h", hdr, 40, len(shape))
+        for index, dim in enumerate(shape):
+            struct.pack_into("<h", hdr, 42 + 2 * index, dim)
+        struct.pack_into("<h", hdr, 70, datatype)
+        struct.pack_into("<h", hdr, 72, bitpix)
+        struct.pack_into("<f", hdr, 76, 1.0)
+        for index in range(len(shape)):
+            struct.pack_into("<f", hdr, 80 + 4 * index, 1.0)
+        struct.pack_into("<f", hdr, 108, 352.0)
+        struct.pack_into("<f", hdr, 112, 1.0)
+        hdr[344:348] = b"n+1\x00"
+        path = os.path.join(self.root, "case.nii")
+        with open(path, "wb") as fid:
+            fid.write(bytes(hdr) + b"\x00" * 4)
+            fid.write(np.asarray(values, dtype=dtype).tobytes(order="F"))
+        return path
+
+    def test_column_major_payload_is_read_back_correctly(self):
+        """Known layout, no external reader involved."""
+        expected = np.arange(2 * 3 * 4, dtype=np.int16).reshape((2, 3, 4))
+        path = self._write_nifti1((2, 3, 4), expected)
+        got = np.asarray(nii2jnii(path)["NIFTIData"])
+        self.assertEqual(got.shape, (2, 3, 4))
+        self.assertTrue(np.array_equal(got, expected))
+
+    def test_first_voxels_follow_the_fastest_varying_axis(self):
+        """Element order in the file is x fastest, so [0,0,0] then [1,0,0]."""
+        expected = np.arange(3 * 4 * 5, dtype=np.int16).reshape((3, 4, 5))
+        path = self._write_nifti1((3, 4, 5), expected)
+        got = np.asarray(nii2jnii(path)["NIFTIData"])
+        self.assertEqual(int(got[0, 0, 0]), int(expected[0, 0, 0]))
+        self.assertEqual(int(got[1, 0, 0]), int(expected[1, 0, 0]))
+        self.assertEqual(int(got[0, 1, 0]), int(expected[0, 1, 0]))
+
+    def test_non_cubic_shape_would_fail_under_row_major(self):
+        """A shape with distinct extents cannot survive the wrong order."""
+        expected = np.arange(2 * 7 * 3, dtype=np.int16).reshape((2, 7, 3))
+        path = self._write_nifti1((2, 7, 3), expected)
+        got = np.asarray(nii2jnii(path)["NIFTIData"])
+        self.assertTrue(np.array_equal(got, expected))
+        self.assertFalse(np.array_equal(got, expected.ravel().reshape((2, 7, 3))[::-1]))
+
+    def test_four_dimensional_volume(self):
+        expected = np.arange(3 * 4 * 5 * 6, dtype=np.int16).reshape((3, 4, 5, 6))
+        path = self._write_nifti1((3, 4, 5, 6), expected)
+        self.assertTrue(np.array_equal(np.asarray(nii2jnii(path)["NIFTIData"]), expected))
+
+    def test_write_then_read_round_trip(self):
+        for shape in ((2, 3, 4), (5, 6, 7, 8), (11, 13)):
+            data = np.arange(int(np.prod(shape)), dtype=np.uint16).reshape(shape)
+            path = os.path.join(self.root, "rt%d.nii" % len(shape))
+            savenifti(data, path)
+            self.assertTrue(
+                np.array_equal(np.asarray(nii2jnii(path)["NIFTIData"]), data), str(shape)
+            )
+
+    @unittest.skipUnless(HAVE_NIBABEL, "nibabel is required for the cross-check")
+    def test_agrees_with_nibabel_on_read(self):
+        expected = np.arange(3 * 4 * 5, dtype=np.int16).reshape((3, 4, 5))
+        path = self._write_nifti1((3, 4, 5), expected)
+        import nibabel
+
+        self.assertTrue(
+            np.array_equal(
+                np.asarray(nii2jnii(path)["NIFTIData"]),
+                np.asanyarray(nibabel.load(path).dataobj),
+            )
+        )
+
+    @unittest.skipUnless(HAVE_NIBABEL, "nibabel is required for the cross-check")
+    def test_files_written_by_jdata_are_read_correctly_by_nibabel(self):
+        """The part that mattered: our output must be right for other tools."""
+        import nibabel
+
+        for shape in ((2, 3, 4), (5, 6, 7, 8)):
+            data = np.arange(int(np.prod(shape)), dtype=np.float32).reshape(shape)
+            path = os.path.join(self.root, "out%d.nii" % len(shape))
+            savenifti(data, path)
+            self.assertTrue(
+                np.array_equal(np.asanyarray(nibabel.load(path).dataobj), data), str(shape)
+            )
