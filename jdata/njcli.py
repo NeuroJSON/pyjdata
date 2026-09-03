@@ -37,8 +37,17 @@ __all__ = ["main", "convert_dataset", "dataset_outdir"]
 # =============================================================================
 
 
-def dataset_outdir(outputroot, dsname, version):
-    return os.path.join(outputroot, dsname, version)
+def dataset_outdir(outputroot, dsname):
+    """Directory holding one dataset's converted output.
+
+    One current document per dataset, not a tree of versions.  CouchDB produces
+    a hash for every revision it stores, so it is already the version authority;
+    keeping a parallel per-version archive here would mean maintaining a second
+    versioning scheme and keeping the two in step.  What the document carries
+    instead are the upstream identifiers -- git commit, release tag, per-file
+    content hashes -- which is what maps it back to git-annex.
+    """
+    return os.path.join(outputroot, dsname)
 
 
 def _write_atomic(path, text):
@@ -49,16 +58,8 @@ def _write_atomic(path, text):
     os.replace(tmp, path)
 
 
-def _relink(link, target):
-    tmp = "%s.tmp.%d" % (link, os.getpid())
-    if os.path.lexists(tmp):
-        os.unlink(tmp)
-    os.symlink(target, tmp)
-    os.replace(tmp, link)
-
-
 def convert_dataset(dspath, outputroot, dbname, casroot, options, force=False):
-    """Convert one dataset and write its immutable per-version output.
+    """Convert one dataset and write its output.
 
     Returns a small summary dict; nothing large crosses the process boundary so
     this is safe to fan out with a process pool.
@@ -80,52 +81,28 @@ def convert_dataset(dspath, outputroot, dbname, casroot, options, force=False):
         cas.close()
 
     version = result["version"]["Version"]
-    outdir = dataset_outdir(outputroot, dsname, version)
+    label = result["version"].get("VersionLabel") or version or "unknown"
+    outdir = dataset_outdir(outputroot, dsname)
     docpath = os.path.join(outdir, "doc.json")
-
     doctext = canonical_json(result["doc"])
 
-    # A per-version directory is what a DOI points at, so it must never be
-    # silently replaced by different content.  Version labels are derived to be
-    # collision-proof, but a rewritten upstream history or a hand-edited archive
-    # could still land here, and overwriting would destroy a published snapshot
-    # without a trace.
-    metapath = os.path.join(outdir, "meta.json")
-    if not force and os.path.isfile(metapath):
-        try:
-            with open(metapath, "r", encoding="utf-8") as fid:
-                previous = json.load(fid).get("fingerprint")
-        except Exception:
-            previous = None
-        if previous and previous != result["fingerprint"]:
-            return {
-                "ds": dsname,
-                "version": version,
-                "fingerprint": result["fingerprint"],
-                "status": "conflict",
-                "error": (
-                    "version %s already holds different content (fingerprint %s, "
-                    "now %s); refusing to overwrite a published snapshot, pass "
-                    "--force to replace it" % (version, previous[:12], result["fingerprint"][:12])
-                ),
-                "files": len(result["manifest"]),
-                "docbytes": len(doctext),
-                "seconds": time.time() - started,
-                "errors": len(result["errors"]),
-            }
+    summary = {
+        "ds": dsname,
+        "version": version,
+        "label": label,
+        "commit": result["version"].get("SourceCommit"),
+        "docbytes": len(doctext),
+        "files": len(result["manifest"]),
+        "errors": len(result["errors"]),
+        "offloaded": len(result["stats"].get("offloaded", [])),
+    }
+
     if (not force) and os.path.exists(docpath):
         with open(docpath, "r", encoding="utf-8") as fid:
             if fid.read() == doctext:
-                return {
-                    "ds": dsname,
-                    "version": version,
-                    "fingerprint": result["fingerprint"],
-                    "status": "unchanged",
-                    "docbytes": len(doctext),
-                    "files": len(result["manifest"]),
-                    "seconds": time.time() - started,
-                    "errors": len(result["errors"]),
-                }
+                summary["status"] = "unchanged"
+                summary["seconds"] = time.time() - started
+                return summary
 
     _write_atomic(docpath, doctext)
     _write_atomic(os.path.join(outdir, "manifest.tsv"), result["manifest_blob"])
@@ -137,8 +114,8 @@ def convert_dataset(dspath, outputroot, dbname, casroot, options, force=False):
             {
                 "dataset": dsname,
                 "database": dbname,
+                "label": label,
                 "version": result["version"],
-                "fingerprint": result["fingerprint"],
                 "stats": result["stats"],
                 "errors": result["errors"],
                 "docbytes": len(doctext),
@@ -148,19 +125,9 @@ def convert_dataset(dspath, outputroot, dbname, casroot, options, force=False):
             sort_keys=True,
         ),
     )
-    _relink(os.path.join(outputroot, dsname, "latest"), version)
-
-    return {
-        "ds": dsname,
-        "version": version,
-        "fingerprint": result["fingerprint"],
-        "status": "written",
-        "docbytes": len(doctext),
-        "files": len(result["manifest"]),
-        "seconds": time.time() - started,
-        "errors": len(result["errors"]),
-        "offloaded": len(result["stats"].get("offloaded", [])),
-    }
+    summary["status"] = "written"
+    summary["seconds"] = time.time() - started
+    return summary
 
 
 def _convert_worker(args):
@@ -268,7 +235,7 @@ def cmd_convert(args):
                     len(jobs),
                     res["ds"],
                     res["status"],
-                    res.get("version", "-"),
+                    (res.get("label") or res.get("version") or "-"),
                     res.get("docbytes", 0) / 1024.0,
                     res.get("files", 0),
                     res.get("seconds", 0),
@@ -314,32 +281,35 @@ NON_DOCUMENT_FILES = ("doc.json", "meta.json", "datacite.json")
 
 
 def _iter_published(outputroot, names=None, split_names=None):
-    """Yield ``(dsname, version, docpath, splitpaths)`` for each latest version.
+    """Yield ``(dsname, label, docpath, splitpaths)`` for each converted dataset.
 
     Split documents are recognised by name against the known split directories,
     not by "any .json that is not doc.json".  The loose test previously picked up
-    the DataCite record written alongside the document and tried to publish it as
-    a derivatives document.
+    the DataCite record written alongside the document and tried to publish it
+    as a derivatives document.
     """
+    known = tuple(split_names or NJBIDS_DEFAULT["split_dirs"])
     for dsname in sorted(names or os.listdir(outputroot)):
         dsdir = os.path.join(outputroot, dsname)
-        latest = os.path.join(dsdir, "latest")
-        if not os.path.isdir(dsdir) or not os.path.islink(latest):
-            continue
-        version = os.readlink(latest)
-        vdir = os.path.join(dsdir, version)
-        docpath = os.path.join(vdir, "doc.json")
+        docpath = os.path.join(dsdir, "doc.json")
         if not os.path.isfile(docpath):
             continue
-        known = tuple(split_names or NJBIDS_DEFAULT["split_dirs"])
+        label = "-"
+        metapath = os.path.join(dsdir, "meta.json")
+        if os.path.isfile(metapath):
+            try:
+                with open(metapath, "r", encoding="utf-8") as fid:
+                    label = json.load(fid).get("label") or "-"
+            except Exception:
+                pass
         splits = {
-            name[: -len(".json")]: os.path.join(vdir, name)
-            for name in sorted(os.listdir(vdir))
+            name[: -len(".json")]: os.path.join(dsdir, name)
+            for name in sorted(os.listdir(dsdir))
             if name.endswith(".json")
             and name not in NON_DOCUMENT_FILES
             and name[: -len(".json")] in known
         }
-        yield dsname, version, docpath, splits
+        yield dsname, label, docpath, splits
 
 
 def _trim_to(docpath, cas, db, ds, target, limit=None, cas_url_base=None):
@@ -453,7 +423,7 @@ def cmd_push(args):
         published = False
         for attempt in range(args.max_trim + 1):
             try:
-                couch.push_file(args.db, dsname, docpath, design=args.design)
+                couch.push_file(args.db, dsname, docpath, design=args.design, handler=args.handler)
                 published = True
                 break
             except CouchError as err:
@@ -499,7 +469,7 @@ def cmd_push(args):
         for name, path in splits.items():
             target = args.split_db or ("%s_%s" % (args.db, name.rstrip("s")))
             try:
-                couch.push_file(target, dsname, path, design=args.design)
+                couch.push_file(target, dsname, path, design=args.design, handler=args.handler)
             except CouchError as err:
                 print("  %-12s %s push failed %s %s" % (dsname, name, err.status, err.body))
         ok += 1
@@ -736,77 +706,46 @@ def _read_manifest(path):
 
 
 def cmd_verify(args):
-    """Reconcile the on-disk archive, its manifest, and the content store.
+    """Check that a converted dataset's links resolve in the content store.
 
-    Three independent checks, because a DOI is a claim about bytes and each
-    check can fail on its own:
+    There is no document-level fingerprint to recompute -- CouchDB produces the
+    revision hash, and the document carries upstream identifiers rather than one
+    of its own.  What is worth checking is that those identifiers are honoured:
 
-    * the fingerprint recorded in the document must equal the fingerprint
-      recomputed from the document and its manifest -- proving the archive has
-      not been edited since it was written;
-    * every manifest entry must name an object that is actually present in the
-      store -- proving the links resolve;
-    * with --deep, a sample of those objects is re-hashed -- proving the bytes
-      themselves are intact.
+    * every ``_DataLink_`` names an object that is actually present, so the
+      links are not promises the store cannot keep;
+    * every manifest line agrees with the object it names;
+    * with ``--deep``, a sample of objects is re-hashed, proving the bytes are
+      intact and (via ``st_nlink``) that the store still holds hardlinks rather
+      than private copies.
     """
-    from .njbids import fingerprint, _dehydrate
-
-    cas = (
-        CAS(args.cas, mode="none", algo=args.algo, annex_hash=(args.algo != "sha256"))
-        if args.cas
-        else None
-    )
-    checked = fp_bad = missing = 0
+    cas = CAS(args.cas, mode="none", algo=args.algo, annex_hash=True) if args.cas else None
+    checked = missing = unfetched = 0
     problems = []
 
-    for dsname, version, docpath, _splits in _iter_published(args.output, args.ds):
-        vdir = os.path.dirname(docpath)
+    for dsname, label, docpath, _splits in _iter_published(args.output, args.ds):
         with open(docpath, "r", encoding="utf-8") as fid:
             doc = json.load(fid)
-        recorded = (doc.get(".neurojson") or {}).get("Fingerprint")
-        manifest = _read_manifest(os.path.join(vdir, "manifest.tsv"))
-
-        # the fingerprint is computed over the document *without* the metadata
-        # block, since the block carries the fingerprint itself
-        payload = {k: v for k, v in doc.items() if k != ".neurojson"}
-        recomputed, _blob = fingerprint(payload, manifest)
         checked += 1
-        if recorded and recomputed != recorded:
-            fp_bad += 1
-            problems.append("%s@%s: fingerprint mismatch" % (dsname, version))
-
-        if cas:
-            # Check the links, not the manifest.  Every file is manifested,
-            # including the ones whose content is inlined in the document and
-            # therefore deliberately never materialised as an object; only a
-            # _DataLink_ makes a promise that something is retrievable.
-            absent, unfetched = [], 0
-            for algo, digest, where in _iter_links(doc):
-                if algo != cas.algo:
-                    # a link under a different algorithm than this store uses
-                    # (e.g. an annex-key reference to content never fetched)
-                    unfetched += 1
-                    continue
-                if not cas.has(digest):
-                    absent.append(where)
-            if absent:
-                missing += len(absent)
-                problems.append(
-                    "%s@%s: %d link(s) do not resolve in the store, e.g. %s"
-                    % (dsname, version, len(absent), absent[0])
-                )
-            if unfetched and args.verbose:
-                print("    %d link(s) reference content not fetched locally" % unfetched)
-        if args.verbose:
-            print(
-                "  %-12s %-14s %5d files %s"
-                % (dsname, version, len(manifest), "ok" if not problems else "see below")
+        if cas is None:
+            continue
+        absent = []
+        for algo, digest, where in _iter_links(doc):
+            if not cas.has(digest):
+                # a link to content the mirror has not fetched is expected, not
+                # an error: the digest still identifies it for later retrieval
+                unfetched += 1
+                absent.append(where)
+        if absent:
+            missing += len(absent)
+            problems.append(
+                "%s@%s: %d link(s) not present in the store, e.g. %s"
+                % (dsname, label, len(absent), absent[0])
             )
+        if args.verbose:
+            print("  %-12s %-24s %s" % (dsname, label, "ok" if not absent else "see below"))
 
-    print(
-        "%d version(s) checked: %d fingerprint mismatch, %d manifest object(s) missing"
-        % (checked, fp_bad, missing)
-    )
+    print("%d dataset(s) checked, %d link(s) not present in the store" % (checked, missing))
     for line in problems[:20]:
         print("  " + line)
 
@@ -830,7 +769,7 @@ def cmd_doi(args):
     from .njdoi import datacite
 
     written = 0
-    for dsname, version, docpath, _splits in _iter_published(args.output, args.ds):
+    for dsname, label, docpath, _splits in _iter_published(args.output, args.ds):
         vdir = os.path.dirname(docpath)
         with open(docpath, "r", encoding="utf-8") as fid:
             doc = json.load(fid)
@@ -860,7 +799,7 @@ def cmd_doi(args):
             _write_atomic(os.path.join(vdir, "datacite.json"), text)
             written += 1
             if args.verbose:
-                print("  %-12s %-14s %s" % (dsname, version, record.get("titles")[0]["title"][:50]))
+                print("  %-12s %-22s %s" % (dsname, label, record.get("titles")[0]["title"][:50]))
     if not args.stdout:
         print("wrote %d datacite.json record(s)" % written)
     return 0
@@ -868,7 +807,7 @@ def cmd_doi(args):
 
 def cmd_report(args):
     rows = []
-    for dsname, version, docpath, splits in _iter_published(args.output, args.ds):
+    for dsname, label, docpath, splits in _iter_published(args.output, args.ds):
         metapath = os.path.join(os.path.dirname(docpath), "meta.json")
         meta = {}
         if os.path.isfile(metapath):
@@ -877,12 +816,12 @@ def cmd_report(args):
         rows.append(
             {
                 "ds": dsname,
-                "version": version,
+                "label": label,
                 "docbytes": os.path.getsize(docpath),
                 "files": meta.get("stats", {}).get("files"),
                 "errors": len(meta.get("errors", [])),
                 "offloaded": len(meta.get("stats", {}).get("offloaded", [])),
-                "fingerprint": meta.get("fingerprint", "")[:16],
+                "commit": (meta.get("version", {}) or {}).get("SourceCommit") or "",
             }
         )
     rows.sort(key=lambda r: -r["docbytes"])
@@ -893,20 +832,20 @@ def cmd_report(args):
         % (len(rows), total / 1e6, len(over), args.max_doc)
     )
     print(
-        "%-12s %-14s %10s %7s %7s %6s  %s"
-        % ("dataset", "version", "docbytes", "files", "errors", "offl", "fingerprint")
+        "%-12s %-22s %10s %7s %7s %6s  %s"
+        % ("dataset", "label", "docbytes", "files", "errors", "offl", "commit")
     )
     for row in rows[: args.top]:
         print(
-            "%-12s %-14s %10d %7s %7d %6d  %s"
+            "%-12s %-22s %10d %7s %7d %6d  %s"
             % (
                 row["ds"],
-                row["version"],
+                row["label"],
                 row["docbytes"],
                 row["files"],
                 row["errors"],
                 row["offloaded"],
-                row["fingerprint"],
+                row["commit"][:12],
             )
         )
     return 0
@@ -986,6 +925,13 @@ def build_parser():
     )
     push.add_argument("--server", required=True)
     push.add_argument("--design", default="qq")
+    push.add_argument(
+        "--handler",
+        default="replace",
+        help="update handler to publish through. 'replace' (default) replaces "
+        "the document body, which is what a digest needs; 'timestamp' merges, "
+        "which would keep data that was removed upstream",
+    )
     push.add_argument("--netrc", default="neurojson.io", help="netrc machine for credentials")
     push.add_argument("--ds", nargs="*")
     push.add_argument("--cas", help="content store, needed to hold trimmed subtrees")

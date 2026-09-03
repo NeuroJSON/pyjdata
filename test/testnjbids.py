@@ -36,9 +36,8 @@ from jdata.njbids import (
     strip_trailing_commas,
     canonical_json,
     dataset_version,
-    fingerprint,
+    manifest_blob,
     fileext,
-    _dehydrate,
 )
 
 
@@ -266,7 +265,8 @@ class TestConversion(unittest.TestCase):
     def test_untagged_head_keeps_the_doi_prefix_but_pins_the_commit(self):
         """A declared version cannot be confirmed to describe *this* commit."""
         version = self.result["version"]
-        self.assertTrue(version["Version"].startswith("2.3.1+g"))
+        self.assertIsNone(version["Version"])
+        self.assertTrue(version["VersionLabel"].startswith("2.3.1+g"))
         self.assertEqual(version["BaseVersion"], "2.3.1")
         self.assertEqual(version["VersionSource"], "dataset_description.DatasetDOI+commit")
         self.assertFalse(version["VersionExact"])
@@ -291,30 +291,28 @@ class TestDeterminism(unittest.TestCase):
         second = canonical_json(self._convert()["doc"])
         self.assertEqual(first, second)
 
-    def test_fingerprint_is_stable(self):
-        self.assertEqual(self._convert()["fingerprint"], self._convert()["fingerprint"])
+    def test_document_is_stable(self):
+        self.assertEqual(
+            canonical_json(self._convert()["doc"]), canonical_json(self._convert()["doc"])
+        )
 
-    def test_fingerprint_survives_a_url_template_change(self):
-        """Relocating the download endpoint must not invalidate a minted DOI."""
+    def test_url_template_change_shows_up_in_the_document(self):
         one = self._convert(cas_url="https://a.example/get?x=1")
         two = self._convert(cas_url="https://totally-different.example/dl?y=2")
-        self.assertEqual(one["fingerprint"], two["fingerprint"])
-        # ...while the documents themselves genuinely differ
         self.assertNotEqual(canonical_json(one["doc"]), canonical_json(two["doc"]))
 
-    def test_fingerprint_changes_when_content_changes(self):
-        before = self._convert()["fingerprint"]
+    def test_document_changes_when_content_changes(self):
+        before = canonical_json(self._convert()["doc"])
         _write(os.path.join(self.ds, "README"), "edited content\n")
-        after = self._convert()["fingerprint"]
-        self.assertNotEqual(before, after)
+        self.assertNotEqual(before, canonical_json(self._convert()["doc"]))
 
-    def test_fingerprint_changes_when_a_payload_changes(self):
-        before = self._convert()["fingerprint"]
+    def test_document_changes_when_a_payload_changes(self):
+        before = canonical_json(self._convert()["doc"])
         make_nifti(
             os.path.join(self.ds, "sub-01", "anat", "sub-01_T1w.nii.gz"),
             dims=(8, 8, 4),
         )
-        self.assertNotEqual(before, self._convert()["fingerprint"])
+        self.assertNotEqual(before, canonical_json(self._convert()["doc"]))
 
     def test_canonical_json_is_sorted_and_compact(self):
         text = canonical_json({"b": 1, "a": {"d": 2, "c": 3}})
@@ -323,10 +321,6 @@ class TestDeterminism(unittest.TestCase):
     def test_canonical_json_replaces_non_finite_floats(self):
         text = canonical_json({"x": float("nan"), "y": [float("inf"), 1.5]})
         self.assertEqual(json.loads(text), {"x": None, "y": [None, 1.5]})
-
-    def test_dehydrate_reduces_links_to_bare_hashes(self):
-        node = {"a": {"_DataLink_": "https://h/x?hash=sha256:" + "f" * 64 + "&size=1"}}
-        self.assertEqual(_dehydrate(node)["a"]["_DataLink_"], "sha256:" + "f" * 64)
 
 
 class TestSizeBudget(unittest.TestCase):
@@ -374,7 +368,6 @@ class TestSizeBudget(unittest.TestCase):
             [i["path"] for i in one["stats"]["offloaded"]],
             [i["path"] for i in two["stats"]["offloaded"]],
         )
-        self.assertEqual(one["fingerprint"], two["fingerprint"])
 
     def test_no_offload_when_document_already_fits(self):
         result = bids2json(self.ds, dbname="db", dsname="dsB", cas=self.cas, max_doc=50 << 20)
@@ -414,13 +407,15 @@ class TestVersionResolution(unittest.TestCase):
         self._tag(path, "00006", "57fecb0ccce88d000ac17538")
         info = dataset_version(path, {})
         self.assertEqual(info["VersionSource"], "git-commit")
-        self.assertTrue(info["Version"].startswith("0.0.0+g"))
+        self.assertIsNone(info["Version"])
+        self.assertTrue(info["VersionLabel"].startswith("0.0.0+g"))
         self.assertFalse(info["VersionExact"])
 
     def test_doi_used_as_a_prefix_when_no_semver_tag(self):
         path = self._repo("c")
         info = dataset_version(path, {"DatasetDOI": "10.18112/openneuro.ds1.v1.2.3"})
-        self.assertTrue(info["Version"].startswith("1.2.3+g"))
+        self.assertIsNone(info["Version"])
+        self.assertTrue(info["VersionLabel"].startswith("1.2.3+g"))
         self.assertEqual(info["BaseVersion"], "1.2.3")
         self.assertFalse(info["VersionExact"])
 
@@ -428,7 +423,8 @@ class TestVersionResolution(unittest.TestCase):
         path = self._repo("d")
         info = dataset_version(path, {})
         self.assertEqual(info["VersionSource"], "git-commit")
-        self.assertEqual(len(info["Version"]), len("0.0.0+g") + 8)
+        self.assertIsNone(info["Version"])
+        self.assertEqual(len(info["VersionLabel"]), len("0.0.0+g") + 8)
         self.assertFalse(info["VersionExact"])
 
     def test_tagged_then_updated_does_not_reuse_the_release_label(self):
@@ -467,8 +463,9 @@ class TestVersionResolution(unittest.TestCase):
         )
         updated = dataset_version(path, {"DatasetDOI": "doi:10.18112/openneuro.x.v1.0.0"})
 
-        self.assertNotEqual(updated["Version"], tagged["Version"])
-        self.assertTrue(updated["Version"].startswith("1.0.0+1.g"))
+        self.assertIsNone(updated["Version"])
+        self.assertNotEqual(updated["VersionLabel"], tagged["VersionLabel"])
+        self.assertTrue(updated["VersionLabel"].startswith("1.0.0+1.g"))
         self.assertEqual(updated["BaseVersion"], "1.0.0")
         self.assertEqual(updated["CommitsAhead"], 1)
         self.assertEqual(updated["VersionSource"], "git-tag+commits")
@@ -498,7 +495,7 @@ class TestVersionResolution(unittest.TestCase):
             )
         info = dataset_version(path, {})
         self.assertEqual(info["CommitsAhead"], 3)
-        self.assertTrue(info["Version"].startswith("2.0.0+3.g"))
+        self.assertTrue(info["VersionLabel"].startswith("2.0.0+3.g"))
 
     def test_newest_tag_is_the_base_not_the_first(self):
         path = self._repo("g")
@@ -530,8 +527,8 @@ class TestVersionResolution(unittest.TestCase):
         seen = {}
         for index in range(4):
             info = dataset_version(path, {"DatasetDOI": "doi:x.v1.0.0"})
-            self.assertNotIn(info["Version"], seen, "label reused for new content")
-            seen[info["Version"]] = info["SourceCommit"]
+            self.assertNotIn(info["VersionLabel"], seen, "label reused for new content")
+            seen[info["VersionLabel"]] = info["SourceCommit"]
             _write(os.path.join(path, "CHANGES"), "rev %d\n" % index)
             subprocess.run(["git", "-C", path, "add", "-A"], capture_output=True, check=True)
             subprocess.run(
@@ -557,54 +554,48 @@ class TestVersionResolution(unittest.TestCase):
         make_bids(path, git=False, derivatives=False)
         info = dataset_version(path, {})
         self.assertIsNone(info["SourceCommit"])
-        self.assertEqual(info["Version"], "0.0.0+unknown")
+        self.assertIsNone(info["Version"])
+        self.assertEqual(info["VersionLabel"], "0.0.0+unknown")
         self.assertFalse(info["VersionExact"])
 
 
-class TestFingerprintFunction(unittest.TestCase):
-    def test_manifest_order_does_not_matter(self):
-        manifest = [
-            {"path": "b", "sha256": "1" * 64, "size": 2},
-            {"path": "a", "sha256": "0" * 64, "size": 1},
-        ]
-        one, _ = fingerprint({"k": 1}, manifest)
-        two, _ = fingerprint({"k": 1}, list(reversed(manifest)))
-        self.assertEqual(one, two)
+class TestManifestBlob(unittest.TestCase):
+    """The manifest is the mapping from a published digest back to git-annex."""
 
-    def test_changing_a_hash_changes_the_fingerprint(self):
-        base = [{"path": "a", "sha256": "0" * 64, "size": 1}]
-        other = [{"path": "a", "sha256": "1" * 64, "size": 1}]
-        self.assertNotEqual(fingerprint({}, base)[0], fingerprint({}, other)[0])
-
-    def test_manifest_blob_is_tab_separated_and_sorted(self):
-        manifest = [
-            {"path": "z", "sha256": "1" * 64, "size": 2},
-            {"path": "a", "sha256": "0" * 64, "size": 1},
-        ]
-        _digest, blob = fingerprint({}, manifest)
+    def test_lines_are_sorted_by_path(self):
+        blob = manifest_blob(
+            [
+                {"path": "z", "algo": "md5", "sha256": "1" * 32, "size": 2},
+                {"path": "a", "algo": "md5", "sha256": "0" * 32, "size": 1},
+            ]
+        )
         lines = blob.strip().split("\n")
         self.assertTrue(lines[0].endswith("\ta"))
         self.assertTrue(lines[1].endswith("\tz"))
-        self.assertTrue(lines[-1].startswith("payload\t"))
 
-    def test_manifest_names_the_algorithm_of_each_digest(self):
-        """Digests in one dataset come from different algorithms."""
-        manifest = [
-            {"path": "a", "algo": "sha256", "sha256": "0" * 64, "size": 1},
-            {"path": "b", "algo": "md5", "sha256": "f" * 32, "size": 2},
-        ]
-        _digest, blob = fingerprint({}, manifest)
+    def test_each_line_names_its_algorithm(self):
+        blob = manifest_blob(
+            [
+                {"path": "a", "algo": "sha256", "sha256": "0" * 64, "size": 1},
+                {"path": "b", "algo": "md5", "sha256": "f" * 32, "size": 2},
+            ]
+        )
         self.assertIn("sha256:%s\t1\ta" % ("0" * 64), blob)
         self.assertIn("md5:%s\t2\tb" % ("f" * 32), blob)
 
-    def test_differing_algorithm_changes_the_fingerprint(self):
-        base = [{"path": "a", "algo": "md5", "sha256": "f" * 32, "size": 1}]
-        other = [{"path": "a", "algo": "sha256", "sha256": "f" * 32, "size": 1}]
-        self.assertNotEqual(fingerprint({}, base)[0], fingerprint({}, other)[0])
+    def test_missing_size_becomes_zero(self):
+        blob = manifest_blob([{"path": "a", "algo": "md5", "sha256": "f" * 32, "size": None}])
+        self.assertIn("\t0\ta", blob)
 
+    def test_empty_manifest_yields_empty_string(self):
+        self.assertEqual(manifest_blob([]), "")
 
-if __name__ == "__main__":
-    unittest.main()
+    def test_order_of_input_does_not_matter(self):
+        entries = [
+            {"path": "b", "algo": "md5", "sha256": "1" * 32, "size": 2},
+            {"path": "a", "algo": "md5", "sha256": "0" * 32, "size": 1},
+        ]
+        self.assertEqual(manifest_blob(entries), manifest_blob(list(reversed(entries))))
 
 
 class TestMalformedInputs(unittest.TestCase):
@@ -758,7 +749,7 @@ class TestBudgetTierTwo(unittest.TestCase):
         self.assertIn("Name", doc["dataset_description.json"])
         self.assertIn("participant_id", doc["participants.tsv"])
         self.assertIsInstance(doc["README"], str)
-        self.assertIn("Fingerprint", doc[".neurojson"])
+        self.assertIn("SourceCommit", doc[".neurojson"])
 
     def test_offloaded_subtree_is_retrievable_from_the_store(self):
         offloaded = [i for i in self.result["stats"]["offloaded"] if i["how"] == "subtree"]
@@ -782,7 +773,6 @@ class TestBudgetTierTwo(unittest.TestCase):
             [i["path"] for i in again["stats"]["offloaded"]],
             [i["path"] for i in self.result["stats"]["offloaded"]],
         )
-        self.assertEqual(again["fingerprint"], self.result["fingerprint"])
 
 
 class TestSplitDocumentBudget(unittest.TestCase):
@@ -846,7 +836,6 @@ class TestFileLevelParallelism(unittest.TestCase):
             one = bids2json(self.ds, dbname="db", dsname="dsFP", cas=serial, hash_threads=1)
             two = bids2json(self.ds, dbname="db", dsname="dsFP", cas=parallel, hash_threads=8)
             self.assertEqual(canonical_json(one["doc"]), canonical_json(two["doc"]))
-            self.assertEqual(one["fingerprint"], two["fingerprint"])
             self.assertEqual(
                 [e["path"] for e in one["manifest"]], [e["path"] for e in two["manifest"]]
             )
@@ -1077,7 +1066,6 @@ class TestBudgetIsStrict(unittest.TestCase):
         args = dict(dbname="db", dsname="dsSB2", cas=self.cas, max_doc=4000, max_leaf_offloads=4)
         one = bids2json(self.ds, **args)
         two = bids2json(self.ds, **args)
-        self.assertEqual(one["fingerprint"], two["fingerprint"])
         self.assertEqual(canonical_json(one["doc"]), canonical_json(two["doc"]))
 
 
@@ -1169,7 +1157,6 @@ class TestAttachmentEncoding(unittest.TestCase):
             encode_codec="zlib",
             encode_threads=16,
         )
-        self.assertEqual(again["fingerprint"], self.result["fingerprint"])
         self.assertEqual(canonical_json(again["doc"]), canonical_json(self.result["doc"]))
 
     def test_existing_attachment_is_not_rewritten(self):

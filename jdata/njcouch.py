@@ -215,12 +215,20 @@ class CouchDB:
         )
         return status == 200
 
-    def push(self, db, docid, doc, design="qq", handler="timestamp"):
+    def push(self, db, docid, doc, design="qq", handler="replace"):
         """Publish a data document through the update handler.
 
         Deliberately a POST: the handler owns ``_rev`` resolution and the
         timestamp metadata, so the caller neither reads the current revision nor
         writes any clock value of its own.
+
+        Defaults to the ``replace`` handler rather than ``timestamp``.  A digest
+        is a complete rendering of a dataset version, so publishing it must
+        replace the document body: ``timestamp`` merges, which leaves a subject
+        or file that was removed upstream present in the published document
+        forever -- and leaves the fingerprint describing something other than
+        what was published.  ``timestamp`` remains the right handler for a
+        partial update such as adding an AI summary.
         """
         path = "/%s/_design/%s/_update/%s/%s" % (
             urllib.parse.quote(db, safe=""),
@@ -233,7 +241,7 @@ class CouchDB:
             raise CouchError(status, payload, path)
         return payload
 
-    def push_file(self, db, docid, jsonfile, design="qq", handler="timestamp"):
+    def push_file(self, db, docid, jsonfile, design="qq", handler="replace"):
         """Publish a document straight from a file, without parsing it.
 
         Avoids materialising a multi-megabyte document as Python objects purely

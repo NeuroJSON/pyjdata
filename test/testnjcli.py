@@ -24,14 +24,15 @@ class TestIterPublished(unittest.TestCase):
 
     def setUp(self):
         self.root = tempfile.mkdtemp()
-        self.vdir = os.path.join(self.root, "ds000001", "1.0.0")
+        self.vdir = os.path.join(self.root, "ds000001")
         os.makedirs(self.vdir)
-        for name in ("doc.json", "meta.json", "datacite.json", "derivatives.json"):
+        for name in ("doc.json", "datacite.json", "derivatives.json"):
             with open(os.path.join(self.vdir, name), "w") as fid:
                 fid.write("{}")
+        with open(os.path.join(self.vdir, "meta.json"), "w") as fid:
+            json.dump({"label": "1.0.0"}, fid)
         with open(os.path.join(self.vdir, "manifest.tsv"), "w") as fid:
-            fid.write("%s\t10\ta/b.nii.gz\n" % ("a" * 64))
-        os.symlink("1.0.0", os.path.join(self.root, "ds000001", "latest"))
+            fid.write("md5:%s\t10\ta/b.nii.gz\n" % ("a" * 32))
 
     def tearDown(self):
         shutil.rmtree(self.root, ignore_errors=True)
@@ -39,29 +40,26 @@ class TestIterPublished(unittest.TestCase):
     def test_datacite_record_is_not_treated_as_a_document(self):
         items = list(_iter_published(self.root))
         self.assertEqual(len(items), 1)
-        _ds, _version, _docpath, splits = items[0]
+        _ds, _label, _docpath, splits = items[0]
         self.assertNotIn("datacite", splits)
 
     def test_known_split_directory_is_published(self):
-        _ds, _version, _docpath, splits = list(_iter_published(self.root))[0]
+        _ds, _label, _docpath, splits = list(_iter_published(self.root))[0]
         self.assertIn("derivatives", splits)
 
     def test_unknown_json_is_ignored(self):
         with open(os.path.join(self.vdir, "scratch.json"), "w") as fid:
             fid.write("{}")
-        _ds, _version, _docpath, splits = list(_iter_published(self.root))[0]
+        _ds, _label, _docpath, splits = list(_iter_published(self.root))[0]
         self.assertNotIn("scratch", splits)
 
-    def test_version_comes_from_the_latest_symlink(self):
-        _ds, version, docpath, _splits = list(_iter_published(self.root))[0]
-        self.assertEqual(version, "1.0.0")
-        self.assertTrue(docpath.endswith(os.path.join("1.0.0", "doc.json")))
+    def test_label_comes_from_the_metadata_file(self):
+        _ds, label, docpath, _splits = list(_iter_published(self.root))[0]
+        self.assertEqual(label, "1.0.0")
+        self.assertTrue(docpath.endswith(os.path.join("ds000001", "doc.json")))
 
-    def test_dataset_without_a_latest_symlink_is_skipped(self):
-        other = os.path.join(self.root, "ds999999", "1.0.0")
-        os.makedirs(other)
-        with open(os.path.join(other, "doc.json"), "w") as fid:
-            fid.write("{}")
+    def test_directory_without_a_document_is_skipped(self):
+        os.makedirs(os.path.join(self.root, "ds999999"))
         names = [item[0] for item in _iter_published(self.root)]
         self.assertEqual(names, ["ds000001"])
 
@@ -90,7 +88,7 @@ class TestManifestReader(unittest.TestCase):
     def test_unfetched_entries_have_no_hash(self):
         path = os.path.join(self.root, "m2.tsv")
         with open(path, "w") as fid:
-            fid.write("None\tNone\tunfetched.nii.gz\n")
+            fid.write("md5:None\tNone\tunfetched.nii.gz\n")
         entry = _read_manifest(path)[0]
         self.assertIsNone(entry["sha256"])
         self.assertIsNone(entry["size"])

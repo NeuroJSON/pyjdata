@@ -99,13 +99,13 @@ class TestCredentialHandling(unittest.TestCase):
 
 
 class TestPushSemantics(CouchTestCase):
-    def test_push_uses_post_to_the_update_handler(self):
+    def test_push_defaults_to_the_replace_handler(self):
         self.couch.push("mydb", "ds000001", {"a": 1})
         call = self.rec.calls[-1]
         self.assertEqual(call["method"], "POST")
         self.assertEqual(
             call["url"],
-            "http://example.invalid:5984/mydb/_design/qq/_update/timestamp/ds000001",
+            "http://example.invalid:5984/mydb/_design/qq/_update/replace/ds000001",
         )
         self.assertEqual(json.loads(call["body"]), {"a": 1})
 
@@ -142,7 +142,7 @@ class TestPushSemantics(CouchTestCase):
         self.assertIn("/_design/zz/_update/stamp/d", self.rec.calls[-1]["url"])
 
     def test_failed_push_raises_with_status(self):
-        url = "http://example.invalid:5984/db/_design/qq/_update/timestamp/d"
+        url = "http://example.invalid:5984/db/_design/qq/_update/replace/d"
         self.rec.responses[("POST", url)] = (403, {"error": "forbidden"})
         with self.assertRaises(CouchError) as ctx:
             self.couch.push("db", "d", {})

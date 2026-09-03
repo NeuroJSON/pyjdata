@@ -7,12 +7,17 @@ by an immutable content-addressed ``_DataLink_`` (see :mod:`jdata.njcas`).
 
 Three properties distinguish this from the older ``njprep`` pipeline:
 
-**Version invariance.**  The document is a pure function of the dataset's git
+**Reproducibility.**  The document is a pure function of the dataset's git
 tree.  Nothing time-, host- or path-dependent enters the payload, keys are
 emitted in a fixed order, and attachment identifiers are content hashes rather
 than hashes of a file's path.  Re-running the conversion on unchanged input
-reproduces the document byte for byte, so the accompanying ``fingerprint`` is a
-stable identifier that a DOI can be minted against.
+therefore reproduces the document byte for byte.
+
+The document carries no version hash of its own: CouchDB already produces one
+for every revision it stores.  What it does carry is the *upstream* identifiers
+-- the git commit, the release tag, and per-file content hashes in the manifest
+-- which is what maps a published digest back to git-annex when the payloads are
+wanted.
 
 **No re-encoding.**  Bulky files are registered in the store as their original
 bytes instead of being transcoded into compressed binary JData.  That removes a
@@ -45,7 +50,7 @@ __all__ = [
     "strip_trailing_commas",
     "dataset_version",
     "canonical_json",
-    "fingerprint",
+    "manifest_blob",
     "NJBIDS_DEFAULT",
 ]
 
@@ -78,7 +83,7 @@ NJBIDS_DEFAULT = {
     "linkonly_dirs": ("sourcedata", "code", "stimuli"),
     "cas_url": None,
     # recorded in the metadata block so a document states which scheme produced
-    # its identifiers and therefore its fingerprint
+    # its content-hash identifiers
     "hash_algorithm": "sha256",
     "hash_source": "sha256",
     # re-encode modality payloads into binary JData attachments.  Empty means
@@ -191,9 +196,6 @@ def canonical_json(doc):
     )
 
 
-_HASH_IN_URL = re.compile(r"hash=(sha256|sha1|md5):([0-9a-f]+)")
-
-
 def strip_trailing_commas(text):
     """Remove commas that directly precede a closing brace or bracket.
 
@@ -249,40 +251,18 @@ def _loads_tolerant(text):
         raise
 
 
-def _dehydrate(node):
-    """Reduce every ``_DataLink_`` to its bare content hash.
+def manifest_blob(manifest):
+    """Serialise the per-file content listing, sorted and algorithm-tagged.
 
-    Used only for fingerprinting: it makes the fingerprint invariant to the
-    server hostname, URL scheme and query decoration, so relocating the download
-    endpoint later cannot invalidate a DOI that was already minted.
+    ``<algo>:<hash>\t<size>\t<relpath>``, one line per file.  This is the
+    mapping from a published digest back to git-annex: every payload is named by
+    the same content hash its annex key carries, so a consumer with the manifest
+    can retrieve exactly the bytes the digest describes.
+
+    Each line names its algorithm because one dataset legitimately mixes them --
+    sha256 for a re-encoded attachment's source, whatever the annex key carries
+    for a file that is only referenced.
     """
-    if isinstance(node, dict):
-        out = {}
-        for key, val in node.items():
-            if key == "_DataLink_" and isinstance(val, str):
-                match = _HASH_IN_URL.search(val)
-                out[key] = "%s:%s" % (match.group(1), match.group(2)) if match else val
-            else:
-                out[key] = _dehydrate(val)
-        return out
-    if isinstance(node, list):
-        return [_dehydrate(v) for v in node]
-    return node
-
-
-def fingerprint(doc, manifest):
-    """Content fingerprint of a converted dataset version.
-
-    Computed over a canonical manifest plus the URL-independent form of the
-    document, rather than over the document bytes, so that it identifies the
-    *dataset content* and not the encoding of its links.
-    """
-    import hashlib
-
-    # Each line names its algorithm.  Digests come from different algorithms in
-    # one dataset -- sha256 for a re-encoded attachment's source, whatever the
-    # annex key carries for a file that is only referenced -- so a bare hash
-    # column would be ambiguous to anyone verifying it.
     lines = [
         "%s:%s\t%d\t%s"
         % (
@@ -293,11 +273,7 @@ def fingerprint(doc, manifest):
         )
         for entry in sorted(manifest, key=lambda e: e["path"])
     ]
-    lines.append(
-        "payload\t%s" % hashlib.sha256(canonical_json(_dehydrate(doc)).encode("utf-8")).hexdigest()
-    )
-    blob = "\n".join(lines) + "\n"
-    return hashlib.sha256(blob.encode("utf-8")).hexdigest(), blob
+    return "\n".join(lines) + "\n" if lines else ""
 
 
 # =============================================================================
@@ -321,25 +297,32 @@ def _git(dspath, *args):
 
 
 def dataset_version(dspath, description=None):
-    """Derive a version label that cannot name two different contents.
+    """Describe which upstream version, if any, a checkout corresponds to.
+
+    Returns four things that answer different questions, rather than one string
+    that answers them badly:
+
+    ``Version``
+        the upstream release this checkout **is**, and ``None`` when it is not a
+        release.  So filtering on ``Version == "1.0.0"`` returns citable
+        snapshots and nothing else.  Set only when HEAD sits exactly on a semver
+        tag; a dataset that was tagged 1.0.0 and then updated still declares
+        ``.v1.0.0`` in ``DatasetDOI``, because maintainers rarely revise that
+        field, so a declaration alone is not evidence.
+    ``BaseVersion`` / ``CommitsAhead``
+        the release it descends from and how far it has moved.
+    ``VersionLabel``
+        a human handle in ``git describe`` form -- ``1.0.0+3.gab12cd34``.  It
+        exists for legibility only.  Semver ignores build metadata for
+        precedence, so it neither identifies nor orders anything on its own --
+        the commit does the identifying, and CouchDB's revision does the
+        versioning.
+    ``SourceCommit``
+        ground truth, always recorded.
 
     OpenNeuro tagging is not uniform -- some datasets carry semver snapshot
-    tags, some carry legacy accession or ObjectId tags, some carry none -- so
-    the label is derived rather than trusted, and the commit is always recorded
-    as ground truth.
-
-    The label is only ever a bare release number when HEAD sits exactly on a
-    semver tag.  Otherwise it carries the commit as semver build metadata:
-    ``1.0.0+3.gab12cd34`` for three untagged commits past ``1.0.0``.  That
-    matters more than it looks.  A dataset tagged 1.0.0 and then updated without
-    a new tag still declares ``.v1.0.0`` in its ``DatasetDOI``, because
-    maintainers rarely revise that field -- so trusting it would label the newer
-    content ``1.0.0`` as well.  The per-version archive is keyed by this label,
-    so the newer content would overwrite the real 1.0.0 snapshot, and a DOI
-    minted against ``1.0.0`` would no longer identify unique bytes.
-
-    ``VersionExact`` says whether the label is an upstream release or a derived
-    one, so a consumer can tell a citable snapshot from a moving target.
+    tags, some legacy accession or ObjectId tags, some none -- so all of this is
+    derived rather than trusted.
     """
     commit = _git(dspath, "rev-parse", "HEAD")
     short = commit[:8] if commit else "unknown"
@@ -362,7 +345,11 @@ def dataset_version(dspath, description=None):
     # HEAD exactly on a release tag: the only case that yields a bare number
     at_head = semver_tags(_git(dspath, "tag", "--points-at", "HEAD").splitlines())
     if at_head:
-        info["Version"] = max(at_head)[1]
+        release = max(at_head)[1]
+        info["Version"] = release
+        info["VersionLabel"] = release
+        info["BaseVersion"] = release
+        info["CommitsAhead"] = 0
         info["VersionSource"] = "git-tag"
         info["VersionExact"] = True
         return info
@@ -373,7 +360,8 @@ def dataset_version(dspath, description=None):
         base = max(tagged)[1]
         ahead = _git(dspath, "rev-list", "--count", "%s..HEAD" % base)
         distance = ahead if ahead.isdigit() else "?"
-        info["Version"] = "%s+%s.g%s" % (base.lstrip("v"), distance, short)
+        info["Version"] = None
+        info["VersionLabel"] = "%s+%s.g%s" % (base.lstrip("v"), distance, short)
         info["VersionSource"] = "git-tag+commits"
         info["BaseVersion"] = base
         info["CommitsAhead"] = int(distance) if distance.isdigit() else None
@@ -385,13 +373,18 @@ def dataset_version(dspath, description=None):
         # No tag to measure against, so the declared version cannot be
         # confirmed to describe *this* commit; keep it as the prefix and let the
         # commit make the label unique.
-        info["Version"] = "%s+g%s" % (match.group(1), short)
+        info["Version"] = None
+        info["VersionLabel"] = "%s+g%s" % (match.group(1), short)
         info["VersionSource"] = "dataset_description.DatasetDOI+commit"
         info["BaseVersion"] = match.group(1)
+        info["CommitsAhead"] = None
         info["DatasetDOI"] = doi
         return info
 
-    info["Version"] = "0.0.0+g%s" % short if commit else "0.0.0+unknown"
+    info["Version"] = None
+    info["VersionLabel"] = "0.0.0+g%s" % short if commit else "0.0.0+unknown"
+    info["BaseVersion"] = None
+    info["CommitsAhead"] = None
     info["VersionSource"] = "git-commit" if commit else "none"
     return info
 
@@ -447,7 +440,7 @@ class _Converter:
             # A handler registers the file before parsing it, and a parse
             # failure falls through to the generic link branch, which would
             # register it a second time.  Two manifest lines for one path
-            # inflate the file count and corrupt the fingerprint, so
+            # inflate the file count and duplicate a manifest line, so
             # registration is idempotent per path.
             if store and not existing.get("stored"):
                 self.cas.identify(path, key=existing.get("annexkey") or annex_key(path), store=True)
@@ -1163,12 +1156,22 @@ def bids2json(dspath, dbname=None, dsname=None, cas=None, casroot=None, **kwargs
     if split_offloaded:
         stats["split_offloaded"] = split_offloaded
 
-    fpr, blob = fingerprint(doc, conv.manifest)
+    # No computed fingerprint.  CouchDB already produces a hash for every
+    # revision it stores (_rev), so a second one inside the document would be a
+    # parallel versioning scheme to keep in step with it.  What the document
+    # does carry is the *upstream* identifiers -- the git commit, the release
+    # tag, and per-file content hashes in the manifest -- because those are what
+    # map a published digest back to git-annex when the payloads are wanted.
+    blob = manifest_blob(conv.manifest)
     doc[".neurojson"] = {
         "Version": version["Version"],
+        "VersionLabel": version.get("VersionLabel"),
+        "VersionExact": version.get("VersionExact", False),
+        "BaseVersion": version.get("BaseVersion"),
+        "CommitsAhead": version.get("CommitsAhead"),
         "VersionSource": version["VersionSource"],
         "SourceCommit": version["SourceCommit"],
-        "Fingerprint": fpr,
+        "SourceRemote": version.get("SourceRemote"),
         "Tags": version["Tags"],
         "Files": len(conv.manifest),
         "Bytes": sum(e["size"] or 0 for e in conv.manifest),
@@ -1187,7 +1190,6 @@ def bids2json(dspath, dbname=None, dsname=None, cas=None, casroot=None, **kwargs
         "manifest": conv.manifest,
         "manifest_blob": blob,
         "version": version,
-        "fingerprint": fpr,
         "stats": stats,
         "errors": conv.errors,
     }
@@ -1246,8 +1248,8 @@ def _apply_budget(doc, conv, config, protected=BUDGET_PROTECTED, label="main"):
     participants table, README -- is never touched.
 
     Candidates are ordered by ``(-serialised size, key)`` in both tiers, so the
-    set that gets offloaded is a function of the input alone and the resulting
-    fingerprint stays reproducible.
+    set that gets offloaded is a function of the input alone and the document
+    stays byte-reproducible.
     """
     budget = config.get("max_doc") or 0
     offloaded = []

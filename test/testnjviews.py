@@ -116,8 +116,10 @@ class TestViews(unittest.TestCase):
         self.assertEqual(value["name"], "Synthetic Test Dataset")
         self.assertEqual(sorted(value["subj"]), ["sub-01", "sub-02", "sub-03"])
         self.assertEqual(sorted(value["modality"]), ["anat", "dwi", "func"])
-        self.assertTrue(value["version"].startswith("2.3.1+g"))
-        self.assertEqual(len(value["fingerprint"]), 64)
+        # Version is empty because this fixture is not on a release tag
+        self.assertEqual(value["version"], "")
+        self.assertTrue(value["label"].startswith("2.3.1+g"))
+        self.assertTrue(value["commit"])
         self.assertTrue(value["commit"])
         self.assertGreater(value["files"], 0)
 
@@ -172,12 +174,12 @@ class TestViews(unittest.TestCase):
         for row in rows:
             self.assertTrue(row["value"]["path"].startswith("$."))
 
-    def test_versions_view_reports_the_fingerprint(self):
+    def test_versions_view_reports_the_upstream_identifiers(self):
         rows = run_view("versions", self.docpath)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["key"][0], "dsV")
         self.assertTrue(rows[0]["key"][1].startswith("2.3.1+g"))
-        self.assertEqual(rows[0]["value"]["fingerprint"], self.result["fingerprint"])
+        self.assertEqual(rows[0]["value"]["commit"], self.result["version"]["SourceCommit"])
 
     def test_updatetime_is_empty_before_publication(self):
         """UpdateTime is stamped by the server, so it is absent on disk."""
@@ -227,8 +229,8 @@ class TestUpdateHandler(unittest.TestCase):
 
     def test_converter_metadata_is_preserved_through_the_merge(self):
         meta = self.pushes[-1]["meta"]
-        self.assertTrue(meta["Version"].startswith("2.3.1+g"))
-        self.assertEqual(len(meta["Fingerprint"]), 64)
+        self.assertTrue(meta["VersionLabel"].startswith("2.3.1+g"))
+        self.assertTrue(meta["SourceCommit"])
         self.assertGreater(meta["Files"], 0)
 
     def test_metadata_block_sorts_first(self):

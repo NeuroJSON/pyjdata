@@ -20,7 +20,6 @@ FULL_DOC = {
     ".neurojson": {
         "Version": "3.1.0",
         "SourceCommit": "d" * 40,
-        "Fingerprint": "e" * 64,
         "Files": 133,
         "Bytes": 2416199965,
     },
@@ -118,15 +117,15 @@ class TestDataciteRecord(unittest.TestCase):
             self.record["url"], "https://neurojson.io/db/openneuro_full/ds004789?ver=3.1.0"
         )
 
-    def test_fingerprint_and_commit_are_alternate_identifiers(self):
-        """This is what makes the DOI independently verifiable."""
+    def test_commit_and_accession_are_alternate_identifiers(self):
+        """What pins the record to a retrievable upstream revision."""
         kinds = {
             a["alternateIdentifierType"]: a["alternateIdentifier"]
             for a in self.record["alternateIdentifiers"]
         }
-        self.assertEqual(kinds["NeuroJSON-Fingerprint"], "sha256:" + "e" * 64)
         self.assertEqual(kinds["Git-Commit"], "d" * 40)
         self.assertEqual(kinds["Accession"], "ds004789")
+        self.assertNotIn("NeuroJSON-Fingerprint", kinds)
 
     def test_upstream_doi_becomes_a_variant_relation(self):
         rels = {
@@ -217,7 +216,7 @@ class TestRealConvertedDocument(unittest.TestCase):
         self.assertEqual(record["version"], "1.0.0")
         self.assertEqual(len(record["creators"]), 4)
         kinds = {a["alternateIdentifierType"] for a in record["alternateIdentifiers"]}
-        self.assertIn("NeuroJSON-Fingerprint", kinds)
+        self.assertIn("Accession", kinds)
         json.dumps(record)
 
 

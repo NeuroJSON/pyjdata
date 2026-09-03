@@ -52,7 +52,7 @@ class RobustnessCase(unittest.TestCase):
         """The document must still be complete and serialisable."""
         self.assertIn("dataset_description.json", result["doc"])
         self.assertIn("participant_id", result["doc"]["participants.tsv"])
-        self.assertIn("Fingerprint", result["doc"][".neurojson"])
+        self.assertIn("SourceCommit", result["doc"][".neurojson"])
         canonical_json(result["doc"])  # must not raise
         return result
 
@@ -120,7 +120,7 @@ class TestOddStructures(RobustnessCase):
             path = os.path.join(self.ds, name)
             shutil.rmtree(path) if os.path.isdir(path) else os.remove(path)
         result = bids2json(self.ds, dbname="db", dsname="dsR", cas=self.cas)
-        self.assertIn("Fingerprint", result["doc"][".neurojson"])
+        self.assertIn("SourceCommit", result["doc"][".neurojson"])
         self.assertEqual(result["doc"][".neurojson"]["Files"], 0)
 
     def test_deeply_nested_directories(self):

@@ -1,11 +1,9 @@
 """
 DataCite metadata for a converted dataset version.
 
-A DOI is only useful if the thing it points at cannot change underneath it.
-:mod:`jdata.njbids` provides that half: a dataset version converts to a
-byte-reproducible document with a content fingerprint.  This module provides the
-other half -- the metadata record a registrar needs, derived from the digest so
-that it is generated rather than hand-maintained.
+A DOI is only useful if the thing it points at can be pinned down.  This module
+builds the metadata record a registrar needs, derived from the digest so that it
+is generated rather than hand-maintained.
 
 The output follows the DataCite Metadata Schema 4.x JSON form.  The five
 mandatory properties (``creators``, ``titles``, ``publisher``,
@@ -18,9 +16,10 @@ Two fields deserve note:
     the derived dataset version, so each version gets its own DOI.
 
 ``alternateIdentifiers``
-    carries the NeuroJSON content fingerprint.  That is what lets a third party
-    verify that the bytes they downloaded are the bytes the DOI was minted for,
-    without trusting the server -- recompute the manifest and compare.
+    carries the upstream identifiers -- the source git commit and the accession
+    -- which is what lets a third party fetch exactly the revision the record
+    describes rather than whatever is current.  Per-file content hashes live in
+    the manifest beside the document.
 
 Copyright (c) 2019-2026 Qianqian Fang <q.fang at neu.edu>
 """
@@ -249,13 +248,6 @@ def datacite(
         record["version"] = version
 
     alternates = [{"alternateIdentifier": ds, "alternateIdentifierType": "Accession"}]
-    if meta.get("Fingerprint"):
-        alternates.append(
-            {
-                "alternateIdentifier": "sha256:%s" % meta["Fingerprint"],
-                "alternateIdentifierType": "NeuroJSON-Fingerprint",
-            }
-        )
     if meta.get("SourceCommit"):
         alternates.append(
             {
