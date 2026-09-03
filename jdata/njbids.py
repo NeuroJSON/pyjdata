@@ -272,8 +272,18 @@ def fingerprint(doc, manifest):
     """
     import hashlib
 
+    # Each line names its algorithm.  Digests come from different algorithms in
+    # one dataset -- sha256 for a re-encoded attachment's source, whatever the
+    # annex key carries for a file that is only referenced -- so a bare hash
+    # column would be ambiguous to anyone verifying it.
     lines = [
-        "%s\t%d\t%s" % (entry["sha256"], entry.get("size") or 0, entry["path"])
+        "%s:%s\t%d\t%s"
+        % (
+            entry.get("algo") or "sha256",
+            entry["sha256"],
+            entry.get("size") or 0,
+            entry["path"],
+        )
         for entry in sorted(manifest, key=lambda e: e["path"])
     ]
     lines.append(
@@ -419,6 +429,7 @@ class _Converter:
             info = annex_key_info(key) or {}
             entry = {
                 "path": relpath,
+                "algo": CAS.ANNEX_HASHES.get(info.get("backend", ""), "md5"),
                 "sha256": None,
                 # A dangling link that is not a git-annex key -- a broken
                 # relative symlink, or one pointing outside the dataset -- has
@@ -438,6 +449,7 @@ class _Converter:
             digest, size = self.cas.digest(path, key=key)
         entry = {
             "path": relpath,
+            "algo": self.cas.algo,
             "sha256": digest,
             "size": size,
             "kind": kind,
@@ -450,7 +462,13 @@ class _Converter:
         return entry
 
     def _link(self, entry, jsonpath=None):
-        """Build the ``_DataLink_`` node for a manifest entry."""
+        """Build the ``_DataLink_`` node for a manifest entry.
+
+        The algorithm is taken from the entry rather than assumed.  It used to
+        be omitted here, so ``cas_url``'s default labelled every link
+        ``sha256:`` -- including md5 digests taken from an annex key, which a
+        verifier would then reject and the links view would report wrongly.
+        """
         if entry["sha256"] is None:
             # not fetched locally; fall back to an annex-key reference so the
             # link still identifies exact content and can be resolved once the
@@ -466,7 +484,7 @@ class _Converter:
                 doc=self.dsname,
                 file=entry["path"],
                 base=self.config.get("cas_url"),
-                algo=(info.get("backend", "MD5E")[:-1] or "md5").lower(),
+                algo=entry.get("algo") or "md5",
             )
         else:
             url = cas_url(
@@ -476,6 +494,7 @@ class _Converter:
                 doc=self.dsname,
                 file=entry["path"],
                 base=self.config.get("cas_url"),
+                algo=entry.get("algo") or self.cas.algo,
             )
         if jsonpath:
             url = url + ":" + jsonpath
@@ -571,7 +590,7 @@ class _Converter:
         # the attachment name is a sha256 of the source whatever the store's own
         # algorithm is, so compute it explicitly when they differ
         source = entry.get("sha256")
-        if self.cas.algo != "sha256" or not source:
+        if entry.get("algo") != "sha256" or not source:
             source, _size = self.cas.hashfile_with(path, "sha256")
             entry["sha256_source"] = source
 

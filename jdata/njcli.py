@@ -539,10 +539,12 @@ def _read_manifest(path):
     with open(path, "r", encoding="utf-8") as fid:
         for line in fid:
             parts = line.rstrip("\n").split("\t")
-            if len(parts) == 3 and parts[0] != "payload":
+            if len(parts) == 3 and not parts[0].startswith("payload"):
+                algo, _sep, digest = parts[0].partition(":")
                 entries.append(
                     {
-                        "sha256": parts[0] if parts[0] != "None" else None,
+                        "algo": algo,
+                        "sha256": digest if digest not in ("", "None") else None,
                         "size": int(parts[1]) if parts[1] not in ("", "None") else None,
                         "path": parts[2],
                     }

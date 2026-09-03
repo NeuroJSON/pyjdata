@@ -458,6 +458,21 @@ class TestFingerprintFunction(unittest.TestCase):
         self.assertTrue(lines[1].endswith("\tz"))
         self.assertTrue(lines[-1].startswith("payload\t"))
 
+    def test_manifest_names_the_algorithm_of_each_digest(self):
+        """Digests in one dataset come from different algorithms."""
+        manifest = [
+            {"path": "a", "algo": "sha256", "sha256": "0" * 64, "size": 1},
+            {"path": "b", "algo": "md5", "sha256": "f" * 32, "size": 2},
+        ]
+        _digest, blob = fingerprint({}, manifest)
+        self.assertIn("sha256:%s\t1\ta" % ("0" * 64), blob)
+        self.assertIn("md5:%s\t2\tb" % ("f" * 32), blob)
+
+    def test_differing_algorithm_changes_the_fingerprint(self):
+        base = [{"path": "a", "algo": "md5", "sha256": "f" * 32, "size": 1}]
+        other = [{"path": "a", "algo": "sha256", "sha256": "f" * 32, "size": 1}]
+        self.assertNotEqual(fingerprint({}, base)[0], fingerprint({}, other)[0])
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -1105,9 +1120,7 @@ class TestMixedIdentifierAlgorithms(unittest.TestCase):
     def test_referenced_file_keeps_its_annex_hash_without_being_read(self):
         cas = CAS(os.path.join(self.root, "store"), algo="md5", annex_hash=True, commit_every=1)
         try:
-            result = bids2json(
-                self.ds, dbname="db", dsname="dsMix", cas=cas, encode=("nii",)
-            )
+            result = bids2json(self.ds, dbname="db", dsname="dsMix", cas=cas, encode=("nii",))
             link = result["doc"]["sub-01"]["anat"]["sub-01_photo.jpg"]["_DataLink_"]
             self.assertIn("hash=md5:%s" % self.md5, link)
             self.assertEqual(cas.stats["from_annex"], 1)
@@ -1117,12 +1130,8 @@ class TestMixedIdentifierAlgorithms(unittest.TestCase):
     def test_encoded_attachment_still_uses_sha256(self):
         cas = CAS(os.path.join(self.root, "store2"), algo="md5", annex_hash=True, commit_every=1)
         try:
-            result = bids2json(
-                self.ds, dbname="db", dsname="dsMix", cas=cas, encode=("nii",)
-            )
-            link = result["doc"]["sub-01"]["anat"]["sub-01_T1w.nii.gz"]["NIFTIData"][
-                "_DataLink_"
-            ]
+            result = bids2json(self.ds, dbname="db", dsname="dsMix", cas=cas, encode=("nii",))
+            link = result["doc"]["sub-01"]["anat"]["sub-01_T1w.nii.gz"]["NIFTIData"]["_DataLink_"]
             self.assertIn("hash=sha256:", link)
             self.assertIn("enc=_zlib.bnii", link)
         finally:
@@ -1131,13 +1140,9 @@ class TestMixedIdentifierAlgorithms(unittest.TestCase):
     def test_every_link_states_its_own_algorithm(self):
         cas = CAS(os.path.join(self.root, "store3"), algo="md5", annex_hash=True, commit_every=1)
         try:
-            result = bids2json(
-                self.ds, dbname="db", dsname="dsMix", cas=cas, encode=("nii",)
-            )
+            result = bids2json(self.ds, dbname="db", dsname="dsMix", cas=cas, encode=("nii",))
             found = 0
-            for match in re.finditer(
-                r"hash=([a-z0-9]+):", canonical_json(result["doc"])
-            ):
+            for match in re.finditer(r"hash=([a-z0-9]+):", canonical_json(result["doc"])):
                 self.assertIn(match.group(1), ("md5", "sha256"))
                 found += 1
             self.assertGreater(found, 1)

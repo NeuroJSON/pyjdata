@@ -195,9 +195,7 @@ def nii2jnii(filename, format="jnii", *varargin, **kwargs):
             # the slice used to run one byte past the payload, which leaves
             # frombuffer a length that is not a whole number of elements
             offset = int(nii["hdr"]["vox_offset"][0])
-            nii["img"] = np.frombuffer(
-                gzdata[offset : offset + imgbytenum], dtype=nii["datatype"]
-            )
+            nii["img"] = np.frombuffer(gzdata[offset : offset + imgbytenum], dtype=nii["datatype"])
 
     shape = nii["hdr"]["dim"][1 : nii["hdr"]["dim"][0] + 1]
     expected = int(np.prod(shape))
