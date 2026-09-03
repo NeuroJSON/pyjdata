@@ -15,6 +15,8 @@ __all__ = [
     "jnifticreate",
     "memmapstream",
     "niiheader2jnii",
+    "niiheader",
+    "readheadbytes",
     "niicodemap",
     "niiformat",
     "savejnii",
@@ -1469,3 +1471,76 @@ def savebnii(*args, **kwargs):
     Alias for jd.save
     """
     return jd.save(*args, **kwargs)
+
+
+def readheadbytes(filename, nbytes):
+    """Read the first ``nbytes`` decompressed bytes of a file.
+
+    Transparently handles gzip: only as many compressed blocks as needed are
+    read and inflated, so peeking at the header of a multi-gigabyte ``.nii.gz``
+    costs a few kilobytes of I/O instead of a full decompression.
+    """
+    with open(filename, "rb") as fid:
+        magic = fid.read(2)
+        fid.seek(0)
+        if magic == b"\x1f\x8b":
+            engine = zlib.decompressobj(zlib.MAX_WBITS | 32)
+            out = bytearray()
+            while len(out) < nbytes:
+                chunk = fid.read(65536)
+                if not chunk:
+                    break
+                out += engine.decompress(chunk, nbytes - len(out))
+                if engine.eof:
+                    break
+            return bytes(out)
+        return fid.read(nbytes)
+
+
+def niiheader(filename):
+    """Parse only the header of a NIfTI-1/2 or Analyze 7.5 file.
+
+    Returns ``{'hdr': ...}``, the same shape :func:`niiheader2jnii` consumes, so
+    a JNIfTI metadata structure can be produced without ever reading the voxel
+    data::
+
+        jnii = niiheader2jnii(niiheader('sub-01_T1w.nii.gz'))
+
+    Unlike ``nii2jnii(f, 'jnii', 'niiheader')`` this never inflates the whole
+    file, which matters when indexing a large corpus: the payload of a typical
+    functional run is four to five orders of magnitude larger than its header.
+    """
+    hdrfile = filename
+    if re.search(r"\.[Ii][Mm][Gg](\.[Gg][Zz])*$", filename):
+        hdrfile = re.sub(r"\.[Ii][Mm][Gg](\.[Gg][Zz])*$", r".hdr\g<1>", filename)
+    if not re.search(
+        r"(\.[Hh][Dd][Rr](\.[Gg][Zz])*$|\.[Ii][Mm][Gg](\.[Gg][Zz])*$|\.[Nn][Ii][Ii](\.[Gg][Zz])*$)",
+        filename,
+    ):
+        raise ValueError("file must be a NIfTI (.nii/.nii.gz) or Analyze 7.5 (.hdr/.img) data file")
+
+    rawbytes = readheadbytes(hdrfile, 1024)
+    if len(rawbytes) < 348:
+        raise ValueError("truncated NIfTI header in %s" % filename)
+
+    hdr = memmapstream(rawbytes, niiformat("nifti1"))
+
+    if hdr["sizeof_hdr"] not in [348, 540]:
+        value = hdr["sizeof_hdr"]
+        if not isinstance(value, np.ndarray):
+            value = np.array(value)
+        hdr["sizeof_hdr"] = value.byteswap()
+
+    if hdr["sizeof_hdr"] == 540:  # NIfTI-2
+        hdr = memmapstream(rawbytes, niiformat("nifti2"))
+
+    if hdr["dim"][0] > 7:  # opposite endianness
+        for name in list(hdr.keys()):
+            value = hdr[name]
+            if not isinstance(value, np.ndarray):
+                value = np.array(value)
+            hdr[name] = value.byteswap()
+        if hdr["sizeof_hdr"] > 540:
+            hdr["sizeof_hdr"] = hdr["sizeof_hdr"].byteswap()
+
+    return {"hdr": hdr}

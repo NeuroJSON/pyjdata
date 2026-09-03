@@ -45,6 +45,9 @@ Documentation = "https://github.com/NeuroJSON/pyjdata#readme"
 Repository = "https://github.com/NeuroJSON/pyjdata"
 Issues = "https://github.com/NeuroJSON/pyjdata/issues"
 
+[project.scripts]
+neurojson = "jdata.njcli:main"
+
 [project.optional-dependencies]
 bjdata = ["bjdata"]
 lz4 = ["lz4"]

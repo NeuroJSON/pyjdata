@@ -1,0 +1,447 @@
+"""Tests for jdata.njbids -- BIDS dataset to version-invariant JSON digest.
+
+The properties under test are the ones the versioning and DOI scheme rest on:
+
+  * the document is byte-reproducible from the same input
+  * the fingerprint changes when content changes, and does *not* change when
+    only the download URL template changes
+  * every file appears exactly once in the manifest
+  * the file tree maps onto nested JSON keys the way the CouchDB views expect
+  * an oversized document deterministically offloads until it fits
+"""
+
+import os
+import sys
+import json
+import gzip
+import shutil
+import struct
+import subprocess
+import tempfile
+import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import numpy as np
+
+from jdata.njcas import CAS
+from jdata.njbids import (
+    bids2json,
+    canonical_json,
+    dataset_version,
+    fingerprint,
+    fileext,
+    _dehydrate,
+)
+
+
+def _write(path, text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fid:
+        fid.write(text)
+
+
+def make_nifti(path, dims=(4, 4, 2), dtype=16, voxel=(2.0, 2.0, 3.0), gz=True):
+    """Write a minimal but valid NIfTI-1 volume."""
+    hdr = bytearray(348)
+    struct.pack_into("<i", hdr, 0, 348)
+    struct.pack_into("<h", hdr, 40, len(dims))
+    for i, val in enumerate(dims):
+        struct.pack_into("<h", hdr, 42 + 2 * i, val)
+    struct.pack_into("<h", hdr, 70, dtype)  # float32
+    struct.pack_into("<h", hdr, 72, 32)  # bitpix
+    struct.pack_into("<f", hdr, 76, 1.0)  # pixdim[0]
+    for i, val in enumerate(voxel):
+        struct.pack_into("<f", hdr, 80 + 4 * i, val)
+    struct.pack_into("<f", hdr, 108, 352.0)  # vox_offset
+    struct.pack_into("<f", hdr, 112, 1.0)  # scl_slope
+    hdr[344:348] = b"n+1\x00"
+    body = bytes(hdr) + b"\x00" * 4 + np.zeros(int(np.prod(dims)), np.float32).tobytes()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if gz:
+        with gzip.open(path, "wb") as fid:
+            fid.write(body)
+    else:
+        with open(path, "wb") as fid:
+            fid.write(body)
+    return path
+
+
+def make_bids(root, subjects=("01", "02"), git=False, derivatives=True):
+    """Create a small but structurally complete BIDS dataset."""
+    _write(
+        os.path.join(root, "dataset_description.json"),
+        json.dumps(
+            {
+                "Name": "Synthetic Test Dataset",
+                "BIDSVersion": "1.8.0",
+                "License": "CC0",
+                "Authors": ["A Person", "B Person"],
+                "DatasetDOI": "doi:10.18112/openneuro.dsTEST.v2.3.1",
+            }
+        ),
+    )
+    _write(os.path.join(root, "README"), "A synthetic dataset used by the test suite.\n")
+    _write(os.path.join(root, "CHANGES"), "1.0.0 2024-01-01\n  - first\n")
+    rows = ["participant_id\tage\tsex\thandedness"]
+    for i, sub in enumerate(subjects):
+        rows.append("sub-%s\t%d\t%s\tR" % (sub, 20 + i, "F" if i % 2 == 0 else "M"))
+    _write(os.path.join(root, "participants.tsv"), "\n".join(rows) + "\n")
+    _write(
+        os.path.join(root, "participants.json"),
+        json.dumps({"age": {"Units": "years"}, "sex": {"Description": "sex"}}),
+    )
+    for sub in subjects:
+        base = os.path.join(root, "sub-%s" % sub)
+        make_nifti(os.path.join(base, "anat", "sub-%s_T1w.nii.gz" % sub))
+        _write(
+            os.path.join(base, "anat", "sub-%s_T1w.json" % sub),
+            json.dumps({"EchoTime": 0.003, "Manufacturer": "Siemens"}),
+        )
+        make_nifti(
+            os.path.join(base, "func", "sub-%s_task-rest_bold.nii.gz" % sub),
+            dims=(4, 4, 2, 5),
+        )
+        _write(
+            os.path.join(base, "func", "sub-%s_task-rest_events.tsv" % sub),
+            "onset\tduration\ttrial_type\n0.0\t1.0\tgo\n2.0\t1.0\tstop\n",
+        )
+        _write(os.path.join(base, "dwi", "sub-%s_dwi.bval" % sub), "0 1000 1000\n")
+        _write(
+            os.path.join(base, "dwi", "sub-%s_dwi.bvec" % sub),
+            "0 1 0\n0 0 1\n0 0 0\n",
+        )
+    if derivatives:
+        _write(
+            os.path.join(root, "derivatives", "fmriprep", "dataset_description.json"),
+            json.dumps({"Name": "fmriprep", "DatasetType": "derivative"}),
+        )
+        make_nifti(
+            os.path.join(
+                root, "derivatives", "fmriprep", "sub-01", "sub-01_desc-preproc_bold.nii.gz"
+            )
+        )
+    _write(os.path.join(root, "sourcedata", "notes.txt"), "raw scanner notes\n")
+    if git:
+        env = dict(
+            os.environ,
+            GIT_AUTHOR_NAME="t",
+            GIT_AUTHOR_EMAIL="t@t",
+            GIT_COMMITTER_NAME="t",
+            GIT_COMMITTER_EMAIL="t@t",
+        )
+        run = lambda *a: subprocess.run(
+            ["git", "-C", root] + list(a), capture_output=True, env=env, check=True
+        )
+        run("init", "-q")
+        run("add", "-A")
+        run("commit", "-qm", "initial")
+    return root
+
+
+class TestFileExt(unittest.TestCase):
+    def test_compound_extensions(self):
+        self.assertEqual(fileext("a/b/x.nii.gz"), ".nii.gz")
+        self.assertEqual(fileext("x.tsv.gz"), ".tsv.gz")
+        self.assertEqual(fileext("x.nii"), ".nii")
+        self.assertEqual(fileext("X.TSV"), ".tsv")
+
+    def test_dotted_directory_does_not_confuse_extension(self):
+        # the shell implementation used ${ff#*.} and mis-parsed this
+        self.assertEqual(fileext("ses-1.5T/sub-01_T1w.nii.gz"), ".nii.gz")
+
+
+class TestConversion(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.root = tempfile.mkdtemp()
+        cls.ds = make_bids(os.path.join(cls.root, "dsTEST"), git=True)
+        cls.cas = CAS(os.path.join(cls.root, "cas"), commit_every=1)
+        cls.result = bids2json(cls.ds, dbname="testdb", dsname="dsTEST", cas=cls.cas)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.cas.close()
+        shutil.rmtree(cls.root, ignore_errors=True)
+
+    def test_no_errors(self):
+        self.assertEqual(self.result["errors"], [])
+
+    def test_top_level_keys_match_bids_filenames(self):
+        keys = set(self.result["doc"])
+        for expected in [
+            "dataset_description.json",
+            "README",
+            "CHANGES",
+            "participants.tsv",
+            "participants.json",
+            "sub-01",
+            "sub-02",
+            ".neurojson",
+        ]:
+            self.assertIn(expected, keys)
+
+    def test_path_becomes_nested_keys(self):
+        doc = self.result["doc"]
+        self.assertIn("sub-01_T1w.nii.gz", doc["sub-01"]["anat"])
+        self.assertIn("sub-01_task-rest_events.tsv", doc["sub-01"]["func"])
+
+    def test_text_files_are_plain_strings(self):
+        self.assertIsInstance(self.result["doc"]["README"], str)
+        self.assertIn("synthetic", self.result["doc"]["README"])
+
+    def test_json_sidecar_is_parsed_not_stringified(self):
+        side = self.result["doc"]["sub-01"]["anat"]["sub-01_T1w.json"]
+        self.assertEqual(side["EchoTime"], 0.003)
+
+    def test_tsv_is_column_oriented(self):
+        """The dbinfo/subjects views index participants.tsv by column arrays."""
+        table = self.result["doc"]["participants.tsv"]
+        self.assertEqual(table["participant_id"], ["sub-01", "sub-02"])
+        self.assertEqual(list(table["age"]), [20, 21])
+        self.assertEqual(table["sex"], ["F", "M"])
+
+    def test_nifti_header_inlined_and_payload_linked(self):
+        node = self.result["doc"]["sub-01"]["anat"]["sub-01_T1w.nii.gz"]
+        self.assertIn("NIFTIHeader", node)
+        self.assertIn("NIFTIData", node)
+        hdr = node["NIFTIHeader"]
+        self.assertEqual(list(hdr["Dim"]), [4, 4, 2])
+        self.assertEqual([round(v, 3) for v in hdr["VoxelSize"]], [2.0, 2.0, 3.0])
+        self.assertEqual(hdr["DataType"], "single")  # jdata uses MATLAB type names
+        # the voxels themselves are a link, never inline data
+        self.assertEqual(list(node["NIFTIData"]), ["_DataLink_"])
+        self.assertIn("hash=sha256:", node["NIFTIData"]["_DataLink_"])
+
+    def test_bval_bvec_are_numeric_arrays(self):
+        bval = self.result["doc"]["sub-01"]["dwi"]["sub-01_dwi.bval"]
+        self.assertEqual(list(np.asarray(bval).ravel()), [0.0, 1000.0, 1000.0])
+
+    def test_derivatives_split_into_own_document(self):
+        self.assertIn("derivatives", self.result["split"])
+        deriv = self.result["split"]["derivatives"]
+        self.assertIn("fmriprep", deriv)
+        # and the main document keeps only a cross-reference
+        self.assertEqual(list(self.result["doc"]["derivatives"]), ["_DataLink_"])
+        self.assertIn("testdb_derivative", self.result["doc"]["derivatives"]["_DataLink_"])
+
+    def test_sourcedata_is_link_only(self):
+        node = self.result["doc"]["sourcedata"]["notes.txt"]
+        self.assertEqual(list(node), ["_DataLink_"])
+
+    def test_manifest_covers_every_file_exactly_once(self):
+        paths = [entry["path"] for entry in self.result["manifest"]]
+        self.assertEqual(len(paths), len(set(paths)))
+        on_disk = set()
+        for dirpath, dirnames, filenames in os.walk(self.ds):
+            dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+            for name in filenames:
+                rel = os.path.relpath(os.path.join(dirpath, name), self.ds)
+                on_disk.add(rel.replace(os.sep, "/"))
+        # derivatives live in the split document, so exclude them here
+        main = {p for p in on_disk if not p.startswith("derivatives/")}
+        self.assertEqual(set(paths) & main, main)
+
+    def test_manifest_totals_match_metadata_block(self):
+        meta = self.result["doc"][".neurojson"]
+        self.assertEqual(meta["Files"], len(self.result["manifest"]))
+        self.assertEqual(meta["Bytes"], sum(e["size"] or 0 for e in self.result["manifest"]))
+
+    def test_version_comes_from_dataset_doi_when_untagged(self):
+        version = self.result["version"]
+        self.assertEqual(version["Version"], "2.3.1")
+        self.assertEqual(version["VersionSource"], "dataset_description.DatasetDOI")
+        self.assertTrue(version["SourceCommit"])
+
+
+class TestDeterminism(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.ds = make_bids(os.path.join(self.root, "dsD"), git=True)
+        self.cas = CAS(os.path.join(self.root, "cas"), commit_every=1)
+
+    def tearDown(self):
+        self.cas.close()
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def _convert(self, **kwargs):
+        return bids2json(self.ds, dbname="db", dsname="dsD", cas=self.cas, **kwargs)
+
+    def test_repeated_conversion_is_byte_identical(self):
+        first = canonical_json(self._convert()["doc"])
+        second = canonical_json(self._convert()["doc"])
+        self.assertEqual(first, second)
+
+    def test_fingerprint_is_stable(self):
+        self.assertEqual(self._convert()["fingerprint"], self._convert()["fingerprint"])
+
+    def test_fingerprint_survives_a_url_template_change(self):
+        """Relocating the download endpoint must not invalidate a minted DOI."""
+        one = self._convert(cas_url="https://a.example/get?x=1")
+        two = self._convert(cas_url="https://totally-different.example/dl?y=2")
+        self.assertEqual(one["fingerprint"], two["fingerprint"])
+        # ...while the documents themselves genuinely differ
+        self.assertNotEqual(canonical_json(one["doc"]), canonical_json(two["doc"]))
+
+    def test_fingerprint_changes_when_content_changes(self):
+        before = self._convert()["fingerprint"]
+        _write(os.path.join(self.ds, "README"), "edited content\n")
+        after = self._convert()["fingerprint"]
+        self.assertNotEqual(before, after)
+
+    def test_fingerprint_changes_when_a_payload_changes(self):
+        before = self._convert()["fingerprint"]
+        make_nifti(
+            os.path.join(self.ds, "sub-01", "anat", "sub-01_T1w.nii.gz"),
+            dims=(8, 8, 4),
+        )
+        self.assertNotEqual(before, self._convert()["fingerprint"])
+
+    def test_canonical_json_is_sorted_and_compact(self):
+        text = canonical_json({"b": 1, "a": {"d": 2, "c": 3}})
+        self.assertEqual(text, '{"a":{"c":3,"d":2},"b":1}')
+
+    def test_canonical_json_replaces_non_finite_floats(self):
+        text = canonical_json({"x": float("nan"), "y": [float("inf"), 1.5]})
+        self.assertEqual(json.loads(text), {"x": None, "y": [None, 1.5]})
+
+    def test_dehydrate_reduces_links_to_bare_hashes(self):
+        node = {"a": {"_DataLink_": "https://h/x?hash=sha256:" + "f" * 64 + "&size=1"}}
+        self.assertEqual(_dehydrate(node)["a"]["_DataLink_"], "sha256:" + "f" * 64)
+
+
+class TestSizeBudget(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.ds = make_bids(os.path.join(self.root, "dsB"), git=True, derivatives=False)
+        # a large events table, well past any reasonable document budget
+        rows = ["onset\tduration\ttrial_type\tresponse_time\tstim_file"]
+        for i in range(20000):
+            rows.append(
+                "%f\t1.0\tcondition_%d\t%f\tstimuli/img_%05d.png" % (i * 0.5, i % 7, i * 0.001, i)
+            )
+        _write(
+            os.path.join(self.ds, "sub-01", "func", "sub-01_task-rest_events.tsv"),
+            "\n".join(rows) + "\n",
+        )
+        self.cas = CAS(os.path.join(self.root, "cas"), commit_every=1)
+
+    def tearDown(self):
+        self.cas.close()
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def test_document_is_kept_under_budget(self):
+        budget = 60000
+        result = bids2json(
+            self.ds,
+            dbname="db",
+            dsname="dsB",
+            cas=self.cas,
+            max_doc=budget,
+            max_tsv=1 << 30,
+        )
+        self.assertLessEqual(len(canonical_json(result["doc"])), budget)
+        self.assertTrue(result["stats"]["offloaded"])
+        offloaded = {item["path"] for item in result["stats"]["offloaded"]}
+        self.assertIn("sub-01/func/sub-01_task-rest_events.tsv", offloaded)
+        node = result["doc"]["sub-01"]["func"]["sub-01_task-rest_events.tsv"]
+        self.assertEqual(list(node), ["_DataLink_"])
+
+    def test_offload_choice_is_deterministic(self):
+        args = dict(dbname="db", dsname="dsB", cas=self.cas, max_doc=60000, max_tsv=1 << 30)
+        one = bids2json(self.ds, **args)
+        two = bids2json(self.ds, **args)
+        self.assertEqual(
+            [i["path"] for i in one["stats"]["offloaded"]],
+            [i["path"] for i in two["stats"]["offloaded"]],
+        )
+        self.assertEqual(one["fingerprint"], two["fingerprint"])
+
+    def test_no_offload_when_document_already_fits(self):
+        result = bids2json(self.ds, dbname="db", dsname="dsB", cas=self.cas, max_doc=50 << 20)
+        self.assertEqual(result["stats"]["offloaded"], [])
+
+    def test_participants_table_is_never_size_capped(self):
+        """participants.tsv drives subject search, so it stays inline."""
+        result = bids2json(self.ds, dbname="db", dsname="dsB", cas=self.cas, max_tsv=1)
+        self.assertIn("participant_id", result["doc"]["participants.tsv"])
+
+
+class TestVersionResolution(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def _repo(self, name):
+        path = os.path.join(self.root, name)
+        make_bids(path, git=True, derivatives=False)
+        return path
+
+    def _tag(self, path, *tags):
+        for tag in tags:
+            subprocess.run(["git", "-C", path, "tag", tag], capture_output=True, check=True)
+
+    def test_semver_tag_at_head_wins_over_doi(self):
+        path = self._repo("a")
+        self._tag(path, "1.0.0", "3.1.0", "2.0.0")
+        info = dataset_version(path, {"DatasetDOI": "doi:10.18112/openneuro.x.v2.3.1"})
+        self.assertEqual(info["Version"], "3.1.0")
+        self.assertEqual(info["VersionSource"], "git-tag")
+
+    def test_non_semver_tags_are_ignored(self):
+        path = self._repo("b")
+        self._tag(path, "00006", "57fecb0ccce88d000ac17538")
+        info = dataset_version(path, {})
+        self.assertEqual(info["VersionSource"], "git-commit")
+        self.assertTrue(info["Version"].startswith("commit-"))
+
+    def test_doi_used_when_no_semver_tag(self):
+        path = self._repo("c")
+        info = dataset_version(path, {"DatasetDOI": "10.18112/openneuro.ds1.v1.2.3"})
+        self.assertEqual(info["Version"], "1.2.3")
+
+    def test_commit_fallback_for_untagged_undoied_dataset(self):
+        path = self._repo("d")
+        info = dataset_version(path, {})
+        self.assertEqual(info["VersionSource"], "git-commit")
+        self.assertEqual(len(info["Version"]), len("commit-") + 8)
+
+    def test_non_git_directory_is_handled(self):
+        path = os.path.join(self.root, "plain")
+        make_bids(path, git=False, derivatives=False)
+        info = dataset_version(path, {})
+        self.assertIsNone(info["SourceCommit"])
+        self.assertEqual(info["Version"], "commit-unknown")
+
+
+class TestFingerprintFunction(unittest.TestCase):
+    def test_manifest_order_does_not_matter(self):
+        manifest = [
+            {"path": "b", "sha256": "1" * 64, "size": 2},
+            {"path": "a", "sha256": "0" * 64, "size": 1},
+        ]
+        one, _ = fingerprint({"k": 1}, manifest)
+        two, _ = fingerprint({"k": 1}, list(reversed(manifest)))
+        self.assertEqual(one, two)
+
+    def test_changing_a_hash_changes_the_fingerprint(self):
+        base = [{"path": "a", "sha256": "0" * 64, "size": 1}]
+        other = [{"path": "a", "sha256": "1" * 64, "size": 1}]
+        self.assertNotEqual(fingerprint({}, base)[0], fingerprint({}, other)[0])
+
+    def test_manifest_blob_is_tab_separated_and_sorted(self):
+        manifest = [
+            {"path": "z", "sha256": "1" * 64, "size": 2},
+            {"path": "a", "sha256": "0" * 64, "size": 1},
+        ]
+        _digest, blob = fingerprint({}, manifest)
+        lines = blob.strip().split("\n")
+        self.assertTrue(lines[0].endswith("\ta"))
+        self.assertTrue(lines[1].endswith("\tz"))
+        self.assertTrue(lines[-1].startswith("payload\t"))
+
+
+if __name__ == "__main__":
+    unittest.main()

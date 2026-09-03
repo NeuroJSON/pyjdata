@@ -46,6 +46,11 @@ from . import jpath
 from . import jschema
 from . import njprep
 from . import neurojson
+from . import njcas
+from . import njdigest
+from . import njbids
+from . import njcouch
+from . import njcli
 
 # Re-export all public functions from submodules
 from .jdata import *
@@ -59,6 +64,13 @@ from .jpath import *
 from .jschema import *
 from .njprep import *
 from .neurojson import *
+from .njcas import *
+from .njdigest import *
+from .njbids import *
+from .njcouch import *
+
+# njcli is deliberately not star-imported: its `main` is a console entry point,
+# not part of the library API.
 
 __version__ = "0.9.5"
 __all__ = (
@@ -73,6 +85,10 @@ __all__ = (
     + jschema.__all__
     + njprep.__all__
     + neurojson.__all__
+    + njcas.__all__
+    + njdigest.__all__
+    + njbids.__all__
+    + njcouch.__all__
     + [
         "jdata",
         "jfile",
@@ -85,6 +101,11 @@ __all__ = (
         "jschema",
         "neurojson",
         "njprep",
+        "njcas",
+        "njdigest",
+        "njbids",
+        "njcouch",
+        "njcli",
     ]
 )
 
