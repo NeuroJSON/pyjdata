@@ -263,10 +263,13 @@ class TestConversion(unittest.TestCase):
         self.assertEqual(meta["Files"], len(self.result["manifest"]))
         self.assertEqual(meta["Bytes"], sum(e["size"] or 0 for e in self.result["manifest"]))
 
-    def test_version_comes_from_dataset_doi_when_untagged(self):
+    def test_untagged_head_keeps_the_doi_prefix_but_pins_the_commit(self):
+        """A declared version cannot be confirmed to describe *this* commit."""
         version = self.result["version"]
-        self.assertEqual(version["Version"], "2.3.1")
-        self.assertEqual(version["VersionSource"], "dataset_description.DatasetDOI")
+        self.assertTrue(version["Version"].startswith("2.3.1+g"))
+        self.assertEqual(version["BaseVersion"], "2.3.1")
+        self.assertEqual(version["VersionSource"], "dataset_description.DatasetDOI+commit")
+        self.assertFalse(version["VersionExact"])
         self.assertTrue(version["SourceCommit"])
 
 
@@ -411,25 +414,151 @@ class TestVersionResolution(unittest.TestCase):
         self._tag(path, "00006", "57fecb0ccce88d000ac17538")
         info = dataset_version(path, {})
         self.assertEqual(info["VersionSource"], "git-commit")
-        self.assertTrue(info["Version"].startswith("commit-"))
+        self.assertTrue(info["Version"].startswith("0.0.0+g"))
+        self.assertFalse(info["VersionExact"])
 
-    def test_doi_used_when_no_semver_tag(self):
+    def test_doi_used_as_a_prefix_when_no_semver_tag(self):
         path = self._repo("c")
         info = dataset_version(path, {"DatasetDOI": "10.18112/openneuro.ds1.v1.2.3"})
-        self.assertEqual(info["Version"], "1.2.3")
+        self.assertTrue(info["Version"].startswith("1.2.3+g"))
+        self.assertEqual(info["BaseVersion"], "1.2.3")
+        self.assertFalse(info["VersionExact"])
 
     def test_commit_fallback_for_untagged_undoied_dataset(self):
         path = self._repo("d")
         info = dataset_version(path, {})
         self.assertEqual(info["VersionSource"], "git-commit")
-        self.assertEqual(len(info["Version"]), len("commit-") + 8)
+        self.assertEqual(len(info["Version"]), len("0.0.0+g") + 8)
+        self.assertFalse(info["VersionExact"])
+
+    def test_tagged_then_updated_does_not_reuse_the_release_label(self):
+        """The case that would otherwise overwrite a published snapshot.
+
+        A dataset tagged 1.0.0 and then updated without a new tag still declares
+        .v1.0.0 in DatasetDOI, because maintainers rarely revise that field. If
+        the label were taken from either source the newer content would be
+        called 1.0.0 too, the per-version archive would overwrite the real 1.0.0
+        snapshot, and a DOI minted against 1.0.0 would stop identifying unique
+        bytes.
+        """
+        path = self._repo("e")
+        self._tag(path, "1.0.0")
+        tagged = dataset_version(path, {"DatasetDOI": "doi:10.18112/openneuro.x.v1.0.0"})
+        self.assertEqual(tagged["Version"], "1.0.0")
+        self.assertTrue(tagged["VersionExact"])
+
+        _write(os.path.join(path, "README"), "an untagged update\n")
+        subprocess.run(["git", "-C", path, "add", "-A"], capture_output=True, check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                path,
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-qm",
+                "update",
+            ],
+            capture_output=True,
+            check=True,
+        )
+        updated = dataset_version(path, {"DatasetDOI": "doi:10.18112/openneuro.x.v1.0.0"})
+
+        self.assertNotEqual(updated["Version"], tagged["Version"])
+        self.assertTrue(updated["Version"].startswith("1.0.0+1.g"))
+        self.assertEqual(updated["BaseVersion"], "1.0.0")
+        self.assertEqual(updated["CommitsAhead"], 1)
+        self.assertEqual(updated["VersionSource"], "git-tag+commits")
+        self.assertFalse(updated["VersionExact"])
+
+    def test_distance_from_the_tag_is_counted(self):
+        path = self._repo("f")
+        self._tag(path, "2.0.0")
+        for index in range(3):
+            _write(os.path.join(path, "CHANGES"), "edit %d\n" % index)
+            subprocess.run(["git", "-C", path, "add", "-A"], capture_output=True, check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    path,
+                    "-c",
+                    "user.name=t",
+                    "-c",
+                    "user.email=t@t",
+                    "commit",
+                    "-qm",
+                    "e%d" % index,
+                ],
+                capture_output=True,
+                check=True,
+            )
+        info = dataset_version(path, {})
+        self.assertEqual(info["CommitsAhead"], 3)
+        self.assertTrue(info["Version"].startswith("2.0.0+3.g"))
+
+    def test_newest_tag_is_the_base_not_the_first(self):
+        path = self._repo("g")
+        self._tag(path, "1.0.0", "2.0.0", "1.5.0")
+        _write(os.path.join(path, "README"), "after tags\n")
+        subprocess.run(["git", "-C", path, "add", "-A"], capture_output=True, check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                path,
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-qm",
+                "after",
+            ],
+            capture_output=True,
+            check=True,
+        )
+        self.assertEqual(dataset_version(path, {})["BaseVersion"], "2.0.0")
+
+    def test_labels_are_unique_per_content(self):
+        """Two different contents must never carry the same label."""
+        path = self._repo("h")
+        self._tag(path, "1.0.0")
+        seen = {}
+        for index in range(4):
+            info = dataset_version(path, {"DatasetDOI": "doi:x.v1.0.0"})
+            self.assertNotIn(info["Version"], seen, "label reused for new content")
+            seen[info["Version"]] = info["SourceCommit"]
+            _write(os.path.join(path, "CHANGES"), "rev %d\n" % index)
+            subprocess.run(["git", "-C", path, "add", "-A"], capture_output=True, check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    path,
+                    "-c",
+                    "user.name=t",
+                    "-c",
+                    "user.email=t@t",
+                    "commit",
+                    "-qm",
+                    "r%d" % index,
+                ],
+                capture_output=True,
+                check=True,
+            )
+        self.assertEqual(len(set(seen.values())), 4)
 
     def test_non_git_directory_is_handled(self):
         path = os.path.join(self.root, "plain")
         make_bids(path, git=False, derivatives=False)
         info = dataset_version(path, {})
         self.assertIsNone(info["SourceCommit"])
-        self.assertEqual(info["Version"], "commit-unknown")
+        self.assertEqual(info["Version"], "0.0.0+unknown")
+        self.assertFalse(info["VersionExact"])
 
 
 class TestFingerprintFunction(unittest.TestCase):

@@ -116,7 +116,7 @@ class TestViews(unittest.TestCase):
         self.assertEqual(value["name"], "Synthetic Test Dataset")
         self.assertEqual(sorted(value["subj"]), ["sub-01", "sub-02", "sub-03"])
         self.assertEqual(sorted(value["modality"]), ["anat", "dwi", "func"])
-        self.assertEqual(value["version"], "2.3.1")
+        self.assertTrue(value["version"].startswith("2.3.1+g"))
         self.assertEqual(len(value["fingerprint"]), 64)
         self.assertTrue(value["commit"])
         self.assertGreater(value["files"], 0)
@@ -175,7 +175,8 @@ class TestViews(unittest.TestCase):
     def test_versions_view_reports_the_fingerprint(self):
         rows = run_view("versions", self.docpath)
         self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["key"], ["dsV", "2.3.1"])
+        self.assertEqual(rows[0]["key"][0], "dsV")
+        self.assertTrue(rows[0]["key"][1].startswith("2.3.1+g"))
         self.assertEqual(rows[0]["value"]["fingerprint"], self.result["fingerprint"])
 
     def test_updatetime_is_empty_before_publication(self):
@@ -202,6 +203,7 @@ class TestUpdateHandler(unittest.TestCase):
         cls.docpath = os.path.join(cls.docdir, "doc.json")
         with open(cls.docpath, "w", encoding="utf-8") as fid:
             fid.write(canonical_json(result["doc"]))
+        cls.version = result["version"]["Version"]
         cls.pushes = run_update("timestamp", cls.docpath)
 
     @classmethod
@@ -225,7 +227,7 @@ class TestUpdateHandler(unittest.TestCase):
 
     def test_converter_metadata_is_preserved_through_the_merge(self):
         meta = self.pushes[-1]["meta"]
-        self.assertEqual(meta["Version"], "2.3.1")
+        self.assertTrue(meta["Version"].startswith("2.3.1+g"))
         self.assertEqual(len(meta["Fingerprint"]), 64)
         self.assertGreater(meta["Files"], 0)
 

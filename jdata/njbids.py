@@ -321,43 +321,77 @@ def _git(dspath, *args):
 
 
 def dataset_version(dspath, description=None):
-    """Derive a stable version label and provenance for a dataset checkout.
+    """Derive a version label that cannot name two different contents.
 
-    OpenNeuro tagging is not uniform -- some datasets carry semver snapshot tags,
-    some carry legacy accession or ObjectId tags, and some carry none at all --
-    so the label is *derived* rather than trusted, and the commit SHA is always
-    recorded as the ground truth.
+    OpenNeuro tagging is not uniform -- some datasets carry semver snapshot
+    tags, some carry legacy accession or ObjectId tags, some carry none -- so
+    the label is derived rather than trusted, and the commit is always recorded
+    as ground truth.
 
-    Resolution order: a semver tag pointing at HEAD, then the ``vX.Y.Z`` suffix
-    of ``DatasetDOI``, then ``commit-<short sha>``.
+    The label is only ever a bare release number when HEAD sits exactly on a
+    semver tag.  Otherwise it carries the commit as semver build metadata:
+    ``1.0.0+3.gab12cd34`` for three untagged commits past ``1.0.0``.  That
+    matters more than it looks.  A dataset tagged 1.0.0 and then updated without
+    a new tag still declares ``.v1.0.0`` in its ``DatasetDOI``, because
+    maintainers rarely revise that field -- so trusting it would label the newer
+    content ``1.0.0`` as well.  The per-version archive is keyed by this label,
+    so the newer content would overwrite the real 1.0.0 snapshot, and a DOI
+    minted against ``1.0.0`` would no longer identify unique bytes.
+
+    ``VersionExact`` says whether the label is an upstream release or a derived
+    one, so a consumer can tell a citable snapshot from a moving target.
     """
     commit = _git(dspath, "rev-parse", "HEAD")
+    short = commit[:8] if commit else "unknown"
     info = {
         "SourceCommit": commit or None,
         "SourceRemote": _git(dspath, "config", "--get", "remote.origin.url") or None,
         "VersionSource": None,
+        "VersionExact": False,
     }
 
-    semvers = []
-    for tag in _git(dspath, "tag", "--points-at", "HEAD").splitlines():
-        tag = tag.strip()
-        match = _SEMVER.match(tag)
-        if match:
-            semvers.append((tuple(int(g) for g in match.groups()), tag))
-    if semvers:
-        info["Version"] = max(semvers)[1]
+    def semver_tags(lines):
+        out = []
+        for tag in lines:
+            tag = tag.strip()
+            match = _SEMVER.match(tag)
+            if match:
+                out.append((tuple(int(g) for g in match.groups()), tag))
+        return out
+
+    # HEAD exactly on a release tag: the only case that yields a bare number
+    at_head = semver_tags(_git(dspath, "tag", "--points-at", "HEAD").splitlines())
+    if at_head:
+        info["Version"] = max(at_head)[1]
         info["VersionSource"] = "git-tag"
+        info["VersionExact"] = True
         return info
 
-    doi = (description or {}).get("DatasetDOI") or ""
-    match = re.search(r"\.v(\d+\.\d+\.\d+)$", str(doi))
-    if match:
-        info["Version"] = match.group(1)
-        info["VersionSource"] = "dataset_description.DatasetDOI"
-        info["DatasetDOI"] = str(doi)
+    # otherwise, count how far HEAD has moved past the newest release
+    tagged = semver_tags(_git(dspath, "tag").splitlines())
+    if tagged and commit:
+        base = max(tagged)[1]
+        ahead = _git(dspath, "rev-list", "--count", "%s..HEAD" % base)
+        distance = ahead if ahead.isdigit() else "?"
+        info["Version"] = "%s+%s.g%s" % (base.lstrip("v"), distance, short)
+        info["VersionSource"] = "git-tag+commits"
+        info["BaseVersion"] = base
+        info["CommitsAhead"] = int(distance) if distance.isdigit() else None
         return info
 
-    info["Version"] = "commit-%s" % (commit[:8] if commit else "unknown")
+    doi = str((description or {}).get("DatasetDOI") or "")
+    match = re.search(r"\.v(\d+\.\d+\.\d+)$", doi)
+    if match and commit:
+        # No tag to measure against, so the declared version cannot be
+        # confirmed to describe *this* commit; keep it as the prefix and let the
+        # commit make the label unique.
+        info["Version"] = "%s+g%s" % (match.group(1), short)
+        info["VersionSource"] = "dataset_description.DatasetDOI+commit"
+        info["BaseVersion"] = match.group(1)
+        info["DatasetDOI"] = doi
+        return info
+
+    info["Version"] = "0.0.0+g%s" % short if commit else "0.0.0+unknown"
     info["VersionSource"] = "git-commit" if commit else "none"
     return info
 

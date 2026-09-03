@@ -84,6 +84,35 @@ def convert_dataset(dspath, outputroot, dbname, casroot, options, force=False):
     docpath = os.path.join(outdir, "doc.json")
 
     doctext = canonical_json(result["doc"])
+
+    # A per-version directory is what a DOI points at, so it must never be
+    # silently replaced by different content.  Version labels are derived to be
+    # collision-proof, but a rewritten upstream history or a hand-edited archive
+    # could still land here, and overwriting would destroy a published snapshot
+    # without a trace.
+    metapath = os.path.join(outdir, "meta.json")
+    if not force and os.path.isfile(metapath):
+        try:
+            with open(metapath, "r", encoding="utf-8") as fid:
+                previous = json.load(fid).get("fingerprint")
+        except Exception:
+            previous = None
+        if previous and previous != result["fingerprint"]:
+            return {
+                "ds": dsname,
+                "version": version,
+                "fingerprint": result["fingerprint"],
+                "status": "conflict",
+                "error": (
+                    "version %s already holds different content (fingerprint %s, "
+                    "now %s); refusing to overwrite a published snapshot, pass "
+                    "--force to replace it" % (version, previous[:12], result["fingerprint"][:12])
+                ),
+                "files": len(result["manifest"]),
+                "docbytes": len(doctext),
+                "seconds": time.time() - started,
+                "errors": len(result["errors"]),
+            }
     if (not force) and os.path.exists(docpath):
         with open(docpath, "r", encoding="utf-8") as fid:
             if fid.read() == doctext:
@@ -215,7 +244,7 @@ def cmd_convert(args):
 
     jobs = [(p, args.output, args.db, casroot, options, args.force) for p in paths]
     started = time.time()
-    summary = {"written": 0, "unchanged": 0, "failed": 0}
+    summary = {"written": 0, "unchanged": 0, "failed": 0, "conflict": 0}
     results = []
     logfid = open(args.log, "a", encoding="utf-8") if args.log else None
 
@@ -226,8 +255,11 @@ def cmd_convert(args):
             logfid.write(json.dumps(res) + "\n")
             logfid.flush()
         done = len(results)
-        if res.get("status") == "failed":
-            print("  [%d/%d] %-12s FAILED %s" % (done, len(jobs), res["ds"], res.get("error")))
+        if res.get("status") in ("failed", "conflict"):
+            print(
+                "  [%d/%d] %-12s %s %s"
+                % (done, len(jobs), res["ds"], res["status"].upper(), res.get("error"))
+            )
         elif args.verbose or done % 25 == 0 or done == len(jobs):
             print(
                 "  [%d/%d] %-12s %-9s %-14s %8.1f kB %5d files %6.1fs%s"
@@ -259,17 +291,19 @@ def cmd_convert(args):
     elapsed = time.time() - started
     bytes_out = sum(r.get("docbytes", 0) for r in results)
     print(
-        "\n%d written, %d unchanged, %d failed in %.1fs (%.1f ds/min, %.1f MB of JSON)"
+        "\n%d written, %d unchanged, %d failed, %d conflicting in %.1fs "
+        "(%.1f ds/min, %.1f MB of JSON)"
         % (
             summary.get("written", 0),
             summary.get("unchanged", 0),
             summary.get("failed", 0),
+            summary.get("conflict", 0),
             elapsed,
             60.0 * len(jobs) / elapsed if elapsed else 0,
             bytes_out / 1e6,
         )
     )
-    bad = [r for r in results if r.get("status") == "failed"]
+    bad = [r for r in results if r.get("status") in ("failed", "conflict")]
     for res in bad[:10]:
         print("FAILED %s: %s" % (res["ds"], res.get("error")))
     return 1 if bad else 0
