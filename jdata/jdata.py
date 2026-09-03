@@ -83,6 +83,7 @@ _allownumpy = (
     "_ArrayData_",
     "_ArrayZipSize_",
     "_ArrayZipData_",
+    "_ArrayZipOffsets_",
     "_ArrayIsSparse_",
     "_ArrayIsComplex_",
 )
@@ -92,7 +93,46 @@ _allownumpy = (
 ##====================================================================================
 
 
-def _compress_data(rawbytes, opt, typesize=None):
+def _decompress_data(blob, codec, opt=None, offsets=None):
+    """Decompress a JData ``_ArrayZipData_`` payload.
+
+    ``offsets`` is an ``_ArrayZipOffsets_`` block index.  When present and more
+    than one thread is asked for, zlib and gzip payloads are inflated
+    concurrently; anything unexpected about the index falls back to a serial
+    inflate, since the payload is a perfectly ordinary stream either way.
+    """
+    opt = opt or {}
+    nthread = int(opt.get("nthread", 1) or 1)
+    blob = bytes(blob)
+
+    if codec in ("zlib", "gzip"):
+        if offsets and nthread > 1 and len(offsets) > 2:
+            try:
+                from .zlibmt import decompress_parallel
+
+                return decompress_parallel(blob, offsets, nthread=nthread)
+            except (ValueError, zlib.error):
+                pass  # index unusable; the stream is still standard
+        wbits = zlib.MAX_WBITS if codec == "zlib" else (zlib.MAX_WBITS | 32)
+        return zlib.decompress(blob, wbits)
+    if codec == "lzma":
+        buf = bytearray(blob)
+        if len(buf) > 13:
+            # length field to "unknown", so a truncated trailer does not matter
+            buf[5:13] = b"\xff\xff\xff\xff\xff\xff\xff\xff"
+        return lzma.decompress(buf, lzma.FORMAT_ALONE)
+    if codec == "lz4":
+        import lz4.frame
+
+        return lz4.frame.decompress(blob)
+    if codec.startswith("blosc2"):
+        import blosc2
+
+        return blosc2.decompress2(blob, as_bytearray=False, nthreads=nthread)
+    return blob
+
+
+def _compress_data(rawbytes, opt, typesize=None, return_offsets=False):
     """Compress raw bytes using the codec specified in opt['compression'].
 
     ``opt['nthread']`` above 1 selects a multi-threaded implementation where one
@@ -115,23 +155,29 @@ def _compress_data(rawbytes, opt, typesize=None):
             # thread count and stays reproducible.
             from .zlibmt import compress as zlibmt_compress
 
-            return zlibmt_compress(rawbytes, nthread=nthread)
-        return zlib.compress(rawbytes)
+            return zlibmt_compress(
+                rawbytes, nthread=nthread, return_offsets=return_offsets
+            )
+        return (zlib.compress(rawbytes), None) if return_offsets else zlib.compress(rawbytes)
     elif codec == "gzip":
         if threaded:
             from .zlibmt import gzip_compress
 
-            return gzip_compress(rawbytes, nthread=nthread)
+            return gzip_compress(
+                rawbytes, nthread=nthread, return_offsets=return_offsets
+            )
         gzipper = zlib.compressobj(wbits=(zlib.MAX_WBITS | 16))
         result = gzipper.compress(rawbytes)
         result += gzipper.flush()
-        return result
+        return (result, None) if return_offsets else result
     elif codec == "lzma":
-        return lzma.compress(rawbytes, lzma.FORMAT_ALONE)
+        out = lzma.compress(rawbytes, lzma.FORMAT_ALONE)
+        return (out, None) if return_offsets else out
     elif codec == "lz4":
         import lz4.frame
 
-        return lz4.frame.compress(rawbytes)
+        out = lz4.frame.compress(rawbytes)
+        return (out, None) if return_offsets else out
     elif codec.startswith("blosc2"):
         import blosc2
 
@@ -145,10 +191,11 @@ def _compress_data(rawbytes, opt, typesize=None):
         kwargs = {"nthreads": opt.get("nthread", 1)}
         if typesize:
             kwargs["typesize"] = typesize
-        return blosc2.compress2(rawbytes, codec=BLOSC2CODEC[codec], **kwargs)
+        out = blosc2.compress2(rawbytes, codec=BLOSC2CODEC[codec], **kwargs)
+        return (out, None) if return_offsets else out
     elif codec == "base64":
-        return rawbytes
-    return rawbytes
+        return (rawbytes, None) if return_offsets else rawbytes
+    return (rawbytes, None) if return_offsets else rawbytes
 
 
 def _issparse(d):
@@ -324,9 +371,17 @@ def encode(d, opt=None, **kwargs):
             # to repeat it inline and call zlib.compress directly, which meant
             # the dense array case -- the common one -- silently ignored nthread
             try:
-                newobj["_ArrayZipData_"] = _compress_data(
-                    newobj["_ArrayData_"].data, opt, typesize=d.dtype.itemsize
+                # ask for the block index too: DEFLATE records nothing about
+                # where its blocks start, so without this a reader cannot
+                # inflate them concurrently
+                newobj["_ArrayZipData_"], zipoffsets = _compress_data(
+                    newobj["_ArrayData_"].data,
+                    opt,
+                    typesize=d.dtype.itemsize,
+                    return_offsets=True,
                 )
+                if zipoffsets and len(zipoffsets) > 2:
+                    newobj["_ArrayZipOffsets_"] = zipoffsets
             except ImportError:
                 print(
                     'you must install the "%s" module to compress with this format, ignoring'
@@ -417,26 +472,12 @@ def decode(d, opt=None, **kwargs):
                     ):
                         newobj = base64.b64decode(newobj)
                     if "_ArrayZipType_" in d and d["_ArrayZipType_"] != "base64":
-                        if d["_ArrayZipType_"] == "zlib":
-                            newobj = zlib.decompress(newobj)
-                        elif d["_ArrayZipType_"] == "gzip":
-                            newobj = zlib.decompress(newobj, zlib.MAX_WBITS | 16)
-                        elif d["_ArrayZipType_"] == "lzma":
-                            buf = bytearray(newobj)
-                            if len(buf) > 13:
-                                buf[5:13] = b"\xff\xff\xff\xff\xff\xff\xff\xff"
-                            newobj = lzma.decompress(buf, lzma.FORMAT_ALONE)
-                        elif d["_ArrayZipType_"] == "lz4":
-                            import lz4.frame
-
-                            newobj = lz4.frame.decompress(bytes(newobj))
-                        elif d["_ArrayZipType_"].startswith("blosc2"):
-                            import blosc2
-
-                            nthread = opt.get("nthread", 1)
-                            newobj = blosc2.decompress2(
-                                bytes(newobj), as_bytearray=False, nthreads=nthread
-                            )
+                        newobj = _decompress_data(
+                            newobj,
+                            d["_ArrayZipType_"],
+                            opt,
+                            d.get("_ArrayZipOffsets_"),
+                        )
                     arraydata = np.frombuffer(bytearray(newobj), dtype=np.float64).reshape(
                         d["_ArrayZipSize_"]
                     )
@@ -467,44 +508,23 @@ def decode(d, opt=None, **kwargs):
                         "JData",
                         "compression method {} is not supported".format(d["_ArrayZipType_"]),
                     )
-                if d["_ArrayZipType_"] == "zlib":
-                    newobj = zlib.decompress(bytes(newobj))
-                elif d["_ArrayZipType_"] == "gzip":
-                    newobj = zlib.decompress(bytes(newobj), zlib.MAX_WBITS | 32)
-                elif d["_ArrayZipType_"] == "lzma":
-                    buf = bytearray(newobj)  # set length to -1 (unknown) if EOF appears
-                    buf[5:13] = b"\xff\xff\xff\xff\xff\xff\xff\xff"
-                    newobj = lzma.decompress(buf, lzma.FORMAT_ALONE)
-                elif d["_ArrayZipType_"] == "lz4":
-                    try:
-                        import lz4.frame
-                    except ImportError:
-                        print(
-                            'Warning: you must install "lz4" module to decompress a data record in this file, ignoring'
-                        )
-                        return copy.deepcopy(d) if opt["inplace"] else d
-
-                    try:
-                        newobj = lz4.frame.decompress(bytes(newobj))
-                    except Exception as e:
-                        raise ValueError(f"lz4 decompression failed: {e}")
-
-                elif d["_ArrayZipType_"].startswith("blosc2"):
-                    try:
-                        import blosc2
-                    except ImportError:
-                        print('Warning: you must install "blosc2" module...')
-                        return copy.deepcopy(d) if opt["inplace"] else d
-
-                    try:
-                        blosc2nthread = 1
-                        if "nthread" in opt:
-                            blosc2nthread = opt["nthread"]
-                        newobj = blosc2.decompress2(
-                            bytes(newobj), as_bytearray=False, nthreads=blosc2nthread
-                        )
-                    except Exception as e:
-                        raise ValueError(f"blosc2 decompression failed: {e}")
+                try:
+                    newobj = _decompress_data(
+                        newobj,
+                        d["_ArrayZipType_"],
+                        opt,
+                        d.get("_ArrayZipOffsets_"),
+                    )
+                except ImportError:
+                    print(
+                        'Warning: you must install "%s" to decompress a data record '
+                        "in this file, ignoring" % d["_ArrayZipType_"]
+                    )
+                    return copy.deepcopy(d) if opt["inplace"] else d
+                except Exception as err:
+                    raise ValueError(
+                        "%s decompression failed: %s" % (d["_ArrayZipType_"], err)
+                    )
 
                 newobj = np.frombuffer(bytearray(newobj), dtype=np.dtype(d["_ArrayType_"])).reshape(
                     d["_ArrayZipSize_"]

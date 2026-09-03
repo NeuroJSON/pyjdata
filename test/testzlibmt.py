@@ -23,7 +23,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 
-from jdata.zlibmt import DEFAULT_BLOCKSIZE, compress, decompress, gzip_compress
+from jdata.zlibmt import (
+    DEFAULT_BLOCKSIZE,
+    compress,
+    decompress,
+    decompress_parallel,
+    gzip_compress,
+)
 
 
 def _payload(nbytes, seed=0):
@@ -203,6 +209,165 @@ class TestJdataIntegration(unittest.TestCase):
                 {"v": self.array[:1000]}, compression=codec, compressarraysize=0
             )
             self.assertTrue(np.array_equal(self.jd.decode(encoded)["v"], self.array[:1000]), codec)
+
+
+class TestBlockIndex(unittest.TestCase):
+    """``_ArrayZipOffsets_``: the block index that makes parallel inflate possible.
+
+    DEFLATE records nothing about where its blocks begin, which is why a
+    threaded decoder cannot exist for an arbitrary stream.  Writing the offsets
+    down at compression time -- when they are known for free -- removes that
+    obstacle without changing a byte of the stream itself.
+    """
+
+    def setUp(self):
+        self.data = _payload(24 << 20, seed=7)
+        self.blob, self.offsets = compress(self.data, return_offsets=True)
+
+    def test_index_shape_and_sentinel(self):
+        # [[compressed, uncompressed], ..., sentinel]: the sentinel closes the
+        # last block, so every row i spans offsets[i] to offsets[i + 1]
+        self.assertTrue(all(len(row) == 2 for row in self.offsets))
+        # the first block starts after the 2-byte zlib header
+        self.assertEqual(self.offsets[0], [2, 0])
+        # the sentinel closes the last data block; the stream then carries
+        # deflate's terminal empty block and the adler32 trailer
+        self.assertLess(self.offsets[-1][0], len(self.blob))
+        self.assertGreaterEqual(self.offsets[-1][0], len(self.blob) - 8)
+        self.assertEqual(self.offsets[-1][1], len(self.data))
+        for a, b in zip(self.offsets, self.offsets[1:]):
+            self.assertLess(a[0], b[0])
+            self.assertLess(a[1], b[1])
+
+    def test_index_is_small(self):
+        # it has to be cheap enough to sit inside the JSON document
+        import json
+
+        self.assertLess(len(json.dumps(self.offsets)), 4096)
+
+    def test_indexing_does_not_change_the_stream(self):
+        self.assertEqual(compress(self.data), self.blob)
+
+    def test_stream_is_still_ordinary_zlib(self):
+        self.assertEqual(zlib.decompress(self.blob), self.data)
+
+    def test_parallel_inflate_matches_serial(self):
+        for nthread in (1, 2, 8, 32):
+            self.assertEqual(
+                decompress_parallel(self.blob, self.offsets, nthread=nthread),
+                self.data,
+                nthread,
+            )
+
+    def test_index_locates_one_block_independently(self):
+        # the point of the index: block i can be inflated without inflating 0..i-1
+        i = len(self.offsets) // 2
+        (cstart, ustart), (cend, uend) = self.offsets[i], self.offsets[i + 1]
+        block = zlib.decompressobj(-zlib.MAX_WBITS).decompress(self.blob[cstart:cend])
+        self.assertEqual(block, self.data[ustart:uend])
+
+    def test_rejects_an_index_that_does_not_match(self):
+        # a wrong index must fail loudly rather than return wrong bytes; the
+        # caller falls back to a serial inflate, which always works
+        for bad in (
+            [[0, 0], [7, len(self.data)], [len(self.blob), len(self.data)]],
+            [[0, 0], [len(self.blob), len(self.data) + 1]],
+            [list(reversed(row)) for row in self.offsets],
+        ):
+            with self.assertRaises((ValueError, zlib.error)):
+                decompress_parallel(self.blob, bad, nthread=4)
+
+    def test_single_block_input_is_not_indexed(self):
+        small = _payload(4096, seed=8)
+        blob, offsets = compress(small, return_offsets=True)
+        self.assertEqual(zlib.decompress(blob), small)
+        self.assertEqual(decompress_parallel(blob, offsets, nthread=4), small)
+
+    def test_gzip_container_carries_an_index_too(self):
+        blob, offsets = gzip_compress(self.data, return_offsets=True)
+        self.assertEqual(gzip.decompress(blob), self.data)
+        self.assertEqual(decompress_parallel(blob, offsets, nthread=8), self.data)
+
+
+class TestZipOffsetsInJdata(unittest.TestCase):
+    """The index round-tripping through ``jd.encode``/``jd.decode``."""
+
+    @classmethod
+    def setUpClass(cls):
+        import jdata as jd
+
+        cls.jd = jd
+        cls.array = np.random.RandomState(11).randint(
+            0, 4096, size=12 << 20, dtype=np.uint16
+        )
+
+    def _encode(self, **kwargs):
+        opt = dict(compression="zlib", compressarraysize=0)
+        opt.update(kwargs)
+        return self.jd.encode({"v": self.array}, **opt)["v"]
+
+    def test_threaded_encode_emits_the_key(self):
+        rec = self._encode(nthread=16)
+        self.assertIn("_ArrayZipOffsets_", rec)
+        self.assertGreater(len(rec["_ArrayZipOffsets_"]), 2)
+
+    def test_untouched_when_nthread_is_omitted(self):
+        # no threading asked for, no annotation: old readers see the old document
+        self.assertNotIn("_ArrayZipOffsets_", self._encode())
+
+    def test_key_does_not_depend_on_thread_count(self):
+        self.assertEqual(
+            self._encode(nthread=4)["_ArrayZipOffsets_"],
+            self._encode(nthread=32)["_ArrayZipOffsets_"],
+        )
+
+    def test_decode_is_identical_serial_or_parallel(self):
+        encoded = {"v": self._encode(nthread=16)}
+        for nthread in (1, 4, 32):
+            self.assertTrue(
+                np.array_equal(self.jd.decode(encoded, nthread=nthread)["v"], self.array),
+                nthread,
+            )
+
+    def test_an_unaware_reader_still_decodes(self):
+        # strip the annotation, as a reader that does not know the key would
+        rec = self._encode(nthread=16)
+        rec.pop("_ArrayZipOffsets_")
+        self.assertTrue(np.array_equal(self.jd.decode({"v": rec})["v"], self.array))
+
+    def test_a_corrupt_index_falls_back_instead_of_failing(self):
+        rec = self._encode(nthread=16)
+        rec["_ArrayZipOffsets_"] = [[0, 0], [3, 5], [7, 11]]
+        self.assertTrue(
+            np.array_equal(self.jd.decode({"v": rec}, nthread=8)["v"], self.array)
+        )
+
+    def test_survives_a_json_file_round_trip(self):
+        import json
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fname = os.path.join(tmp, "a.jdt")
+            self.jd.save(
+                {"v": self.array},
+                fname,
+                compression="zlib",
+                compressarraysize=0,
+                nthread=8,
+            )
+            with open(fname) as fid:
+                self.assertIn("_ArrayZipOffsets_", fid.read())
+            back = self.jd.load(fname, nthread=8)
+        self.assertTrue(np.array_equal(back["v"], self.array))
+
+    def test_survives_a_bjdata_round_trip(self):
+        # binary JData: the index travels as a normal integer array
+        encoded = self.jd.encode(
+            {"v": self.array}, compression="zlib", compressarraysize=0, nthread=8
+        )
+        blob = self.jd.dumpb(encoded)
+        back = self.jd.loadbs(blob, nthread=8)
+        self.assertTrue(np.array_equal(back["v"], self.array))
 
 
 if __name__ == "__main__":
