@@ -294,3 +294,65 @@ class TestHdf5Digest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestMatDetection(unittest.TestCase):
+    """A .mat extension does not guarantee a MATLAB file."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def _write(self, name, data, mode="wb"):
+        path = os.path.join(self.root, name)
+        with open(path, mode) as fid:
+            fid.write(data)
+        return path
+
+    def test_matv5_is_detected(self):
+        from jdata.njdigest import is_matfile
+
+        body = b"MATLAB 5.0 MAT-file, created by test".ljust(124, b" ") + b"\x00\x01" + b"IM"
+        self.assertTrue(is_matfile(self._write("a.mat", body)))
+
+    def test_hdf5_matv73_is_detected(self):
+        from jdata.njdigest import is_matfile
+
+        self.assertTrue(is_matfile(self._write("b.mat", b"\x89HDF\r\n\x1a\n" + b"\x00" * 200)))
+
+    def test_fsl_vest_matrix_is_not_a_matfile(self):
+        from jdata.njdigest import is_matfile
+
+        text = "/NumWaves 5\n/NumPoints 26\n/Matrix\n1 2 3 4 5\n"
+        self.assertFalse(is_matfile(self._write("c.mat", text, mode="w")))
+
+    def test_vest_header_fields(self):
+        from jdata.njdigest import vest_header
+
+        text = (
+            "/NumWaves 3\n/NumPoints 4\n/PPheights 1 1 1\n/Matrix\n"
+            "1\t2\t3\n4\t5\t6\n7\t8\t9\n10\t11\t12\n"
+        )
+        header = vest_header(self._write("d.mat", text, mode="w"))["VESTHeader"]
+        self.assertEqual(header["NumWaves"], 3)
+        self.assertEqual(header["NumPoints"], 4)
+        self.assertEqual(header["PPheights"], [1, 1, 1])
+        self.assertEqual(header["NumRows"], 4)
+
+    def test_vest_header_returns_none_for_unrelated_text(self):
+        from jdata.njdigest import vest_header
+
+        blob = "\n".join("this is not a design matrix" for _ in range(200))
+        self.assertIsNone(vest_header(self._write("e.mat", blob, mode="w")))
+
+    def test_vest_reads_only_the_header_not_the_matrix(self):
+        from jdata.njdigest import vest_header
+
+        rows = "\n".join("\t".join("%.6f" % (i + j) for j in range(20)) for i in range(50000))
+        path = self._write("f.mat", "/NumWaves 20\n/Matrix\n" + rows + "\n", mode="w")
+        self.assertGreater(os.path.getsize(path), 5 << 20)
+        header = vest_header(path)["VESTHeader"]
+        self.assertEqual(header["NumWaves"], 20)
+        self.assertNotIn("Matrix", header)

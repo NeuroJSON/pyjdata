@@ -52,6 +52,8 @@ __all__ = [
 NJBIDS_DEFAULT = {
     # threads used to pre-hash annexed payloads within one dataset
     "hash_threads": 1,
+    # most leaf payloads tier 1 will offload before handing over to tier 2
+    "max_leaf_offloads": 256,
     # inline size ceilings, in bytes of the *source* file
     "max_tsv": 1 << 20,
     "max_json": 1 << 20,
@@ -353,6 +355,7 @@ class _Converter:
         self.cas = cas
         self.config = config
         self.manifest = []
+        self.manifest_index = {}
         self.errors = []
         # doc-key path -> (source relpath, serialised length); candidates for
         # the size-budget offload pass
@@ -374,6 +377,18 @@ class _Converter:
         every small sidecar would add millions of entries that nothing ever
         resolves.
         """
+        existing = self.manifest_index.get(relpath)
+        if existing is not None:
+            # A handler registers the file before parsing it, and a parse
+            # failure falls through to the generic link branch, which would
+            # register it a second time.  Two manifest lines for one path
+            # inflate the file count and corrupt the fingerprint, so
+            # registration is idempotent per path.
+            if store and not existing.get("stored"):
+                self.cas.put(path, key=existing.get("annexkey") or annex_key(path))
+                existing["stored"] = True
+            return existing
+
         key = annex_key(path)
         if os.path.islink(path) and not os.path.exists(path):
             # dangling annex symlink: content was never fetched, so the payload
@@ -389,6 +404,7 @@ class _Converter:
                 "present": False,
             }
             self.manifest.append(entry)
+            self.manifest_index[relpath] = entry
             return entry
         if store:
             digest, size = self.cas.put(path, key=key)
@@ -401,8 +417,10 @@ class _Converter:
             "kind": kind,
             "annexkey": key,
             "present": True,
+            "stored": bool(store),
         }
         self.manifest.append(entry)
+        self.manifest_index[relpath] = entry
         return entry
 
     def _link(self, entry, jsonpath=None):
@@ -627,15 +645,29 @@ class _Converter:
         return digest
 
     def _mat(self, path, relpath, size):
-        from .njdigest import mat_digest, eeglab_digest
+        """Digest a ``.mat`` file, which is not always a MATLAB file.
+
+        FSL and TBSS write plain-text VEST design matrices with a ``.mat``
+        extension; ds006391 alone has 98 of them.  Handing those to scipy raises
+        "Unknown mat file type", which previously produced an error per file and
+        discarded metadata that is perfectly readable.
+        """
+        from .njdigest import hdf5_digest, is_matfile, mat_digest, vest_header
 
         entry = self._register(path, relpath, "mat")
+        if not is_matfile(path):
+            vest = vest_header(path)
+            if vest:
+                vest["MATObject"] = self._link(entry)
+                self._count("vest")
+                return vest
+            self._count("mat-unrecognised")
+            return self._link(entry)
+
         with open(path, "rb") as fid:
             magic = fid.read(8)
         if magic == b"\x89HDF\r\n\x1a\n":
-            from .njdigest import hdf5_digest
-
-            digest = {"MATData": hdf5_digest(path, maxelem=self.config.get("max_h5_elem", 4096))}
+            digest = {"MATData": hdf5_digest(path, maxelem=self.config.get("max_h5_elem", 256))}
         else:
             digest = {"MATData": mat_digest(path)}
         digest["MATObject"] = self._link(entry)
@@ -939,19 +971,29 @@ def _apply_budget(doc, conv, config, protected=BUDGET_PROTECTED, label="main"):
         sized.append((len(canonical_json(node)), keypath, relpath))
     sized.sort(key=lambda item: (-item[0], item[1]))
 
-    for nodesize, keypath, relpath in sized:
+    # Tier 1 is capped.  Offloading leaves one at a time is the right move for a
+    # handful of oversized tables, but on a very wide dataset it degenerates:
+    # ds004186 needed 121993 leaf offloads, which took 34 minutes and created
+    # 122k tiny store objects, where shedding a few subtrees would have done it
+    # in seconds.  Past the cap, hand over to tier 2.
+    cap = int(config.get("max_leaf_offloads") or 0) or len(sized)
+    for nodesize, keypath, relpath in sized[:cap]:
         if total <= budget:
             break
         src = os.path.join(conv.dspath, relpath)
         if not os.path.isfile(src):
             continue
         entry = conv._register(src, relpath, "offloaded")
-        conv.manifest.pop()  # already manifested during the initial pass
         link = conv._link(entry)
         _setpath(doc, list(keypath), link)
         total -= nodesize - len(canonical_json(link))
         offloaded.append({"path": relpath, "was": nodesize, "how": "leaf"})
 
+    # The running total is an estimate: replacing a node also shifts separators
+    # and key ordering, so it drifts from the real serialised length.  Re-measure
+    # before deciding whether tier 2 is needed, otherwise the budget is not
+    # actually enforced -- ds003097 came out 211 bytes over.
+    total = len(canonical_json(doc))
     if total <= budget:
         return doc, offloaded
 
@@ -969,7 +1011,7 @@ def _apply_budget(doc, conv, config, protected=BUDGET_PROTECTED, label="main"):
         if total <= budget:
             break
         link, was, record = _offload_node(doc, (key,), conv, "subtree")
-        total -= was - len(canonical_json(link))
         offloaded.append(record)
+        total = len(canonical_json(doc))
 
     return doc, offloaded

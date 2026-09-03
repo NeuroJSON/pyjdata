@@ -18,6 +18,7 @@ Formats covered:
 ``.edf`` ``.bdf``       via :func:`edfheader` (EDF/EDF+/BDF)
 ``.vhdr`` ``.vmrk``     via :func:`bvheader` (BrainVision)
 ``.set``                via :func:`eeglab_digest` (HDF5 or MAT v5)
+``.mat`` (FSL VEST)     via :func:`vest_header` (a text design matrix)
 ======================  ==============================================
 
 EDF, BrainVision and EEGLAB metadata were previously lost entirely -- those
@@ -36,6 +37,8 @@ import numpy as np
 
 __all__ = [
     "hdf5_digest",
+    "vest_header",
+    "is_matfile",
     "snirf_digest",
     "edfheader",
     "bvheader",
@@ -162,6 +165,69 @@ def eeglab_digest(filename, maxelem=256):
     if magic[:8] == b"\x89HDF\r\n\x1a\n":
         return {"EEGLABData": hdf5_digest(filename, maxelem=maxelem)}
     return {"EEGLABData": mat_digest(filename, maxelem=maxelem)}
+
+
+def is_matfile(filename):
+    """True if the file really is a MATLAB container (MAT v5 or v7.3/HDF5).
+
+    A ``.mat`` extension is not a guarantee: FSL and TBSS write plain-text VEST
+    design matrices under the same name, and handing one to ``scipy.io`` raises
+    "Unknown mat file type".
+    """
+    with open(filename, "rb") as fid:
+        head = fid.read(128)
+    if head[:8] == b"\x89HDF\r\n\x1a\n":
+        return True
+    # MAT v5: 116-byte text descriptor, then a 2-byte version and the "MI"/"IM"
+    # endian indicator at offset 126
+    return len(head) >= 128 and head[126:128] in (b"IM", b"MI")
+
+
+def vest_header(filename, maxlines=64):
+    """Parse the header of an FSL/VEST text matrix (``.mat``, ``.con``, ``.grp``).
+
+    The format is a short run of ``/Key value`` lines terminated by ``/Matrix``,
+    after which the numbers begin.  Only the header is read, so the matrix
+    itself -- which can be large -- is never loaded.
+    """
+    header = {}
+    rows = 0
+    with open(filename, "r", encoding="utf-8", errors="replace") as fid:
+        in_matrix = False
+        for index, line in enumerate(fid):
+            text = line.strip()
+            if not in_matrix:
+                if index > maxlines and not header:
+                    return None  # not a VEST file
+                if text == "/Matrix":
+                    in_matrix = True
+                    continue
+                if text.startswith("/"):
+                    key, _sep, value = text[1:].partition(" ")
+                    header[key] = _vest_value(value.strip())
+                continue
+            if text:
+                rows += 1
+    if not header and not rows:
+        return None
+    header["NumRows"] = rows
+    return {"VESTHeader": header}
+
+
+def _vest_value(value):
+    if not value:
+        return None
+    parts = value.split()
+    out = []
+    for part in parts:
+        try:
+            out.append(int(part))
+        except ValueError:
+            try:
+                out.append(float(part))
+            except ValueError:
+                out.append(part)
+    return out[0] if len(out) == 1 else out
 
 
 def mat_digest(filename, maxelem=256):

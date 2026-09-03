@@ -23,6 +23,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import re
+import collections
 
 import numpy as np
 
@@ -782,3 +783,142 @@ class TestTrailingCommaRepair(unittest.TestCase):
 
     def test_legitimate_commas_between_items_are_kept(self):
         self.assertEqual(strip_trailing_commas("[1, 2, 3]"), "[1, 2, 3]")
+
+
+class TestManifestIdempotency(unittest.TestCase):
+    """A file must appear in the manifest exactly once, however it is handled.
+
+    Regression test: a format handler registers the file before parsing it, and
+    a parse failure falls through to the generic link branch, which registered
+    it a second time.  ds006391 ended up with 98 duplicated manifest paths --
+    inflating the reported file count and corrupting the fingerprint, which is
+    computed over the manifest.
+    """
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.ds = make_bids(os.path.join(self.root, "dsMI"), git=True, derivatives=False)
+        self.cas = CAS(os.path.join(self.root, "cas"), commit_every=1)
+
+    def tearDown(self):
+        self.cas.close()
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def _convert(self):
+        return bids2json(self.ds, dbname="db", dsname="dsMI", cas=self.cas)
+
+    def test_no_duplicate_paths_when_a_handler_fails(self):
+        # a .mat that is neither MATLAB nor VEST: registered, then falls through
+        target = os.path.join(self.ds, "sub-01", "anat", "sub-01_model.mat")
+        with open(target, "wb") as fid:
+            fid.write(b"\x00\x01\x02 not a mat file at all" * 10)
+        result = self._convert()
+        paths = [e["path"] for e in result["manifest"]]
+        self.assertEqual(len(paths), len(set(paths)))
+
+    def test_reported_file_count_matches_unique_paths(self):
+        result = self._convert()
+        paths = {e["path"] for e in result["manifest"]}
+        self.assertEqual(result["doc"][".neurojson"]["Files"], len(paths))
+
+    def test_fsl_vest_matrix_yields_searchable_metadata(self):
+        target = os.path.join(self.ds, "sub-01", "anat", "sub-01_design.mat")
+        with open(target, "w") as fid:
+            fid.write("/NumWaves 4\n/NumPoints 3\n/Matrix\n1 2 3 4\n5 6 7 8\n9 10 11 12\n")
+        result = self._convert()
+        node = result["doc"]["sub-01"]["anat"]["sub-01_design.mat"]
+        self.assertEqual(node["VESTHeader"]["NumWaves"], 4)
+        self.assertIn("_DataLink_", node["MATObject"])
+        self.assertEqual(result["errors"], [])
+
+    def test_offloaded_file_is_not_manifested_twice(self):
+        rows = ["onset\tduration\ttrial_type"]
+        for i in range(8000):
+            rows.append("%f\t1.0\tcondition_%d" % (i * 0.5, i % 5))
+        with open(
+            os.path.join(self.ds, "sub-01", "func", "sub-01_task-rest_events.tsv"), "w"
+        ) as fid:
+            fid.write("\n".join(rows) + "\n")
+        result = bids2json(
+            self.ds,
+            dbname="db",
+            dsname="dsMI",
+            cas=self.cas,
+            max_doc=40000,
+            max_tsv=1 << 30,
+        )
+        self.assertTrue(result["stats"]["offloaded"])
+        paths = [e["path"] for e in result["manifest"]]
+        self.assertEqual(len(paths), len(set(paths)))
+
+
+class TestBudgetIsStrict(unittest.TestCase):
+    """The budget must be an actual ceiling, not an estimate.
+
+    Regression test: the offload loop tracked size by decrementing a running
+    total, which drifts from the true serialised length because removing a node
+    also shifts separators and key ordering.  ds003097 came out 211 bytes over
+    its 7,500,000 budget.
+    """
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.ds = os.path.join(self.root, "dsSB2")
+        make_bids(self.ds, subjects=("01",), git=True, derivatives=False)
+        for sub in ("02", "03", "04", "05"):
+            for i in range(40):
+                make_nifti(
+                    os.path.join(
+                        self.ds,
+                        "sub-%s" % sub,
+                        "func",
+                        "sub-%s_task-rest_run-%03d_bold.nii.gz" % (sub, i),
+                    ),
+                    dims=(2, 2, 2),
+                )
+                with open(
+                    os.path.join(
+                        self.ds,
+                        "sub-%s" % sub,
+                        "func",
+                        "sub-%s_task-rest_run-%03d_events.tsv" % (sub, i),
+                    ),
+                    "w",
+                ) as fid:
+                    fid.write("onset\tduration\n" + "".join("%d\t1\n" % j for j in range(40)))
+        self.cas = CAS(os.path.join(self.root, "cas"), commit_every=1)
+
+    def tearDown(self):
+        self.cas.close()
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def test_document_never_exceeds_the_budget(self):
+        for budget in (3000, 8000, 20000, 60000):
+            result = bids2json(self.ds, dbname="db", dsname="dsSB2", cas=self.cas, max_doc=budget)
+            actual = len(canonical_json(result["doc"]))
+            self.assertLessEqual(
+                actual, budget, "budget %d exceeded by %d bytes" % (budget, actual - budget)
+            )
+
+    def test_tier_one_is_capped_so_wide_datasets_shed_subtrees(self):
+        """Leaf-by-leaf offloading degenerates on a wide dataset."""
+        result = bids2json(
+            self.ds,
+            dbname="db",
+            dsname="dsSB2",
+            cas=self.cas,
+            max_doc=4000,
+            max_tsv=1 << 30,
+            max_leaf_offloads=4,
+        )
+        how = collections.Counter(item["how"] for item in result["stats"]["offloaded"])
+        self.assertLessEqual(how["leaf"], 4)
+        self.assertGreater(how["subtree"], 0)
+        self.assertLessEqual(len(canonical_json(result["doc"])), 4000)
+
+    def test_capped_run_is_still_deterministic(self):
+        args = dict(dbname="db", dsname="dsSB2", cas=self.cas, max_doc=4000, max_leaf_offloads=4)
+        one = bids2json(self.ds, **args)
+        two = bids2json(self.ds, **args)
+        self.assertEqual(one["fingerprint"], two["fingerprint"])
+        self.assertEqual(canonical_json(one["doc"]), canonical_json(two["doc"]))
