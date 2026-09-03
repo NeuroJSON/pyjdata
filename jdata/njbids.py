@@ -70,6 +70,10 @@ NJBIDS_DEFAULT = {
     # subtrees kept as link-only manifests (discoverable, but never inlined)
     "linkonly_dirs": ("sourcedata", "code", "stimuli"),
     "cas_url": None,
+    # recorded in the metadata block so a document states which scheme produced
+    # its identifiers and therefore its fingerprint
+    "hash_algorithm": "sha256",
+    "hash_source": "sha256",
 }
 
 _TEXT_BASENAMES = ("README", "CHANGES", "LICENSE", "CITATION", "AUTHORS", "TASK")
@@ -897,6 +901,8 @@ def bids2json(dspath, dbname=None, dsname=None, cas=None, casroot=None, **kwargs
         "Tags": version["Tags"],
         "Files": len(conv.manifest),
         "Bytes": sum(e["size"] or 0 for e in conv.manifest),
+        "HashAlgorithm": cas.algo,
+        "HashSource": config.get("hash_source") or cas.algo,
     }
     if version.get("DatasetDOI"):
         doc[".neurojson"]["DatasetDOI"] = version["DatasetDOI"]

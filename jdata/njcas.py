@@ -54,6 +54,9 @@ _ANNEX_KEY_RE = re.compile(
 
 _READ_CHUNK = 4 << 20  # 4 MiB: large enough that ZFS readahead stays useful
 
+#: expected hex digest length per algorithm, used to sanity-check an annex key
+_HEX_LENGTHS = {"md5": 32, "sha1": 40, "sha256": 64, "sha512": 128}
+
 
 def annex_key(path):
     """Return the git-annex key a symlink points at, or None.
@@ -132,6 +135,19 @@ class CAS:
         Use the SQLite hash memo (default True).
     """
 
+    #: git-annex backends whose key already contains a hash of the payload,
+    #: mapped to the hash algorithm that produced it
+    ANNEX_HASHES = {
+        "MD5": "md5",
+        "MD5E": "md5",
+        "SHA1": "sha1",
+        "SHA1E": "sha1",
+        "SHA256": "sha256",
+        "SHA256E": "sha256",
+        "SHA512": "sha512",
+        "SHA512E": "sha512",
+    }
+
     def __init__(
         self,
         root,
@@ -140,6 +156,7 @@ class CAS:
         memo=True,
         commit_every=64,
         busy_timeout=120.0,
+        annex_hash=False,
     ):
         if mode not in ("link", "symlink", "copy", "none"):
             raise ValueError("mode must be link, symlink, copy or none")
@@ -151,6 +168,12 @@ class CAS:
         self._use_memo = memo
         self.commit_every = max(1, int(commit_every))
         self.busy_timeout = float(busy_timeout)
+        # Take the content hash from the git-annex key instead of reading the
+        # payload.  An MD5E key such as MD5E-s5663237--4608ff... already states
+        # the content hash and the exact size, so this is free -- and the read
+        # needed to hash is otherwise the entire runtime of a pass over a
+        # multi-terabyte mirror.
+        self.annex_hash = bool(annex_hash)
         self._local = threading.local()
         self.stats = {
             "hashed": 0,
@@ -159,11 +182,18 @@ class CAS:
             "linked": 0,
             "already": 0,
             "memo_errors": 0,
+            "from_annex": 0,
         }
         self._statlock = threading.Lock()
         os.makedirs(self.objroot, exist_ok=True)
-        if self._use_memo:
-            self._init_memo()
+        if self._use_memo and not self._init_memo():
+            # The memo is only ever an optimisation.  Creating its schema takes
+            # an exclusive lock, so a pool of workers opening a brand-new store
+            # at the same moment can collide; that must degrade to "no memo",
+            # not fail the worker before it has converted anything.
+            self._use_memo = False
+            with self._statlock:
+                self.stats["memo_errors"] += 1
 
     # -- memo ---------------------------------------------------------------
 
@@ -172,8 +202,10 @@ class CAS:
         # set once, here.  Re-issuing it on every connection needs an exclusive
         # lock, and with a wide process pool all opening the memo at once that
         # lock is what actually serialises the pool.
-        conn = sqlite3.connect(self.dbpath, timeout=60)
+        conn = None
         try:
+            conn = sqlite3.connect(self.dbpath, timeout=self.busy_timeout)
+            conn.execute("PRAGMA busy_timeout=%d" % int(self.busy_timeout * 1000))
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
             conn.execute(
@@ -184,8 +216,15 @@ class CAS:
                 " size INTEGER NOT NULL)"
             )
             conn.commit()
+            return True
+        except sqlite3.Error:
+            return False
         finally:
-            conn.close()
+            if conn is not None:
+                try:
+                    conn.close()
+                except sqlite3.Error:
+                    pass
 
     @property
     def _conn(self):
@@ -287,6 +326,24 @@ class CAS:
             self.stats["bytes_hashed"] += size
         return h.hexdigest(), size
 
+    def annex_digest(self, key):
+        """Return ``(digest, size)`` straight from a git-annex key, or None.
+
+        Only accepted when the key's backend hash matches this store's algorithm,
+        so one identifier scheme covers the whole corpus.
+        """
+        info = annex_key_info(key)
+        if not info or info.get("size") is None:
+            return None
+        if self.ANNEX_HASHES.get(info["backend"]) != self.algo:
+            return None
+        digest = info["hash"].lower()
+        if len(digest) != _HEX_LENGTHS.get(self.algo, 0):
+            return None
+        if any(ch not in "0123456789abcdef" for ch in digest):
+            return None
+        return digest, int(info["size"])
+
     def digest(self, path, key=None):
         """Return ``(digest, size)`` for a file, consulting the memo first.
 
@@ -296,6 +353,12 @@ class CAS:
         """
         if key is None:
             key = annex_key(path)
+        if self.annex_hash and key:
+            fromkey = self.annex_digest(key)
+            if fromkey:
+                with self._statlock:
+                    self.stats["from_annex"] += 1
+                return fromkey
         cached = self.memo_get(key)
         if cached:
             with self._statlock:

@@ -65,7 +65,12 @@ def convert_dataset(dspath, outputroot, dbname, casroot, options, force=False):
     """
     dsname = os.path.basename(dspath.rstrip("/"))
     started = time.time()
-    cas = CAS(casroot, mode=options.get("cas_mode", "link"))
+    cas = CAS(
+        casroot,
+        mode=options.get("cas_mode", "link"),
+        algo=options.get("cas_algo", "sha256"),
+        annex_hash=options.get("cas_annex_hash", False),
+    )
     try:
         result = bids2json(
             dspath, dbname=dbname, dsname=dsname, cas=cas, **options.get("njbids", {})
@@ -164,7 +169,18 @@ def cmd_convert(args):
         print("no datasets found under %s" % args.input, file=sys.stderr)
         return 1
 
-    options = {"cas_mode": args.cas_mode, "njbids": {}}
+    # "annex" takes the content hash out of the git-annex key instead of reading
+    # the payload.  OpenNeuro's annex backend is MD5E, so the key already states
+    # both the content hash and the exact size, and hardlinking is a metadata
+    # operation -- the whole pass then needs no payload reads at all.  Choosing
+    # sha256 instead means reading every byte of the mirror once.
+    algo, annex_hash = ("md5", True) if args.content_hash == "annex" else ("sha256", False)
+    options = {
+        "cas_mode": args.cas_mode,
+        "cas_algo": algo,
+        "cas_annex_hash": annex_hash,
+        "njbids": {"hash_algorithm": algo, "hash_source": args.content_hash},
+    }
     if args.max_doc:
         options["njbids"]["max_doc"] = args.max_doc
     if args.cas_url:
@@ -532,7 +548,11 @@ def cmd_verify(args):
     """
     from .njbids import fingerprint, _dehydrate
 
-    cas = CAS(args.cas, mode="none") if args.cas else None
+    cas = (
+        CAS(args.cas, mode="none", algo=args.algo, annex_hash=(args.algo != "sha256"))
+        if args.cas
+        else None
+    )
     checked = fp_bad = missing = 0
     problems = []
 
@@ -559,9 +579,9 @@ def cmd_verify(args):
             # _DataLink_ makes a promise that something is retrievable.
             absent, unfetched = [], 0
             for algo, digest, where in _iter_links(doc):
-                if algo != "sha256":
-                    # an annex-key reference: upstream content was never fetched
-                    # locally, so there is nothing to check yet
+                if algo != cas.algo:
+                    # a link under a different algorithm than this store uses
+                    # (e.g. an annex-key reference to content never fetched)
                     unfetched += 1
                     continue
                 if not cas.has(digest):
@@ -706,6 +726,14 @@ def build_parser():
     conv.add_argument("--cas", help="content store root (or $NEUROJSON_CAS_ROOT)")
     conv.add_argument("--cas-mode", default="link", choices=["link", "symlink", "copy", "none"])
     conv.add_argument("--cas-url", help="base URL template for _DataLink_")
+    conv.add_argument(
+        "--content-hash",
+        default="annex",
+        choices=["annex", "sha256"],
+        help="how attachment identifiers are derived. 'annex' (default) reads the "
+        "content hash out of the git-annex key, which costs no payload I/O; "
+        "'sha256' hashes every payload, which means reading the whole mirror once",
+    )
     conv.add_argument("--threads", type=int, default=8, help="parallel datasets")
     conv.add_argument(
         "--file-threads",
@@ -770,6 +798,9 @@ def build_parser():
     ver = sub.add_parser("verify", help="reconcile archive, manifest and content store")
     ver.add_argument("--output", required=True)
     ver.add_argument("--cas")
+    ver.add_argument(
+        "--algo", default="md5", choices=["md5", "sha256"], help="store hash algorithm"
+    )
     ver.add_argument("--ds", nargs="*")
     ver.add_argument("--deep", action="store_true", help="also re-hash stored objects")
     ver.add_argument("--sample", type=int, default=200)

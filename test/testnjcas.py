@@ -344,3 +344,122 @@ class TestSampling(unittest.TestCase):
         self.assertEqual(report["checked"], 6)
         self.assertEqual(report["ok"], 6)
         self.assertEqual(report["bad"], [])
+
+
+def _open_fresh(args):
+    """Worker: construct a CAS on a brand-new store and use it."""
+    casroot, index = args
+    cas = CAS(casroot, commit_every=1)
+    try:
+        path = os.path.join(os.path.dirname(casroot), "p%d.bin" % index)
+        with open(path, "wb") as fid:
+            fid.write(b"payload %d" % index)
+        digest, _size = cas.put(path)
+        return digest is not None
+    finally:
+        cas.close()
+
+
+class TestConcurrentStoreCreation(unittest.TestCase):
+    """Creating the memo schema takes an exclusive lock.
+
+    Regression test: a pool of workers all constructing a CAS on a brand-new
+    store collided on that lock, and the exception escaped the constructor --
+    failing the worker before it had converted anything.  Schema creation now
+    degrades to "no memo" instead.
+    """
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def test_many_workers_may_create_the_store_simultaneously(self):
+        from concurrent.futures import ProcessPoolExecutor
+
+        casroot = os.path.join(self.root, "cas")
+        with ProcessPoolExecutor(max_workers=12) as pool:
+            results = list(pool.map(_open_fresh, [(casroot, i) for i in range(12)]))
+        self.assertTrue(all(results))
+
+    def test_store_on_a_read_only_parent_still_works_without_a_memo(self):
+        casroot = os.path.join(self.root, "cas2")
+        cas = CAS(casroot)
+        cas.close()
+        # make the memo unusable, then construct again
+        os.chmod(os.path.join(casroot, "index.sqlite"), 0o000)
+        try:
+            cas = CAS(casroot)
+            payload = os.path.join(self.root, "q.bin")
+            with open(payload, "wb") as fid:
+                fid.write(b"data")
+            digest, size = cas.put(payload)
+            self.assertEqual(size, 4)
+            self.assertEqual(digest, hashlib.sha256(b"data").hexdigest())
+            cas.close()
+        finally:
+            os.chmod(os.path.join(casroot, "index.sqlite"), 0o644)
+
+
+class TestAnnexHashMode(unittest.TestCase):
+    """Taking the content hash from the git-annex key costs no payload I/O.
+
+    An MD5E key states both the content hash and the exact size, and hardlinking
+    is a metadata operation, so a whole conversion pass can run without reading
+    a single payload.  On a multi-terabyte mirror that read *is* the runtime.
+    """
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.payload = b"annexed payload contents"
+        self.md5 = hashlib.md5(self.payload).hexdigest()
+        key = "MD5E-s%d--%s.bin" % (len(self.payload), self.md5)
+        objdir = os.path.join(self.root, "ds", ".git", "annex", "objects", "aa", "bb", key)
+        os.makedirs(objdir)
+        target = os.path.join(objdir, key)
+        with open(target, "wb") as fid:
+            fid.write(self.payload)
+        self.link = os.path.join(self.root, "ds", "file.bin")
+        os.symlink(os.path.relpath(target, os.path.dirname(self.link)), self.link)
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def test_digest_comes_from_the_key_and_is_correct(self):
+        cas = CAS(os.path.join(self.root, "cas"), algo="md5", annex_hash=True)
+        digest, size = cas.digest(self.link)
+        self.assertEqual(digest, self.md5)
+        self.assertEqual(size, len(self.payload))
+        self.assertEqual(cas.stats["hashed"], 0)  # payload never read
+        self.assertEqual(cas.stats["from_annex"], 1)
+        cas.close()
+
+    def test_object_is_still_hardlinked(self):
+        cas = CAS(os.path.join(self.root, "cas2"), algo="md5", annex_hash=True)
+        digest, _size = cas.put(self.link)
+        stored = cas.objpath(digest)
+        self.assertGreater(os.stat(stored).st_nlink, 1)
+        self.assertEqual(cas.stats["bytes_hashed"], 0)
+        cas.close()
+
+    def test_algorithm_mismatch_falls_back_to_hashing(self):
+        """A sha256 store must not accept an MD5E key's hash."""
+        cas = CAS(os.path.join(self.root, "cas3"), algo="sha256", annex_hash=True)
+        digest, _size = cas.digest(self.link)
+        self.assertEqual(digest, hashlib.sha256(self.payload).hexdigest())
+        self.assertEqual(cas.stats["from_annex"], 0)
+        self.assertEqual(cas.stats["hashed"], 1)
+        cas.close()
+
+    def test_malformed_key_falls_back_to_hashing(self):
+        cas = CAS(os.path.join(self.root, "cas4"), algo="md5", annex_hash=True)
+        for bad in ("MD5E-s5--nothex.bin", "MD5E--%s.bin" % self.md5, "URL--http://x"):
+            self.assertIsNone(cas.annex_digest(bad))
+        cas.close()
+
+    def test_disabled_by_default(self):
+        cas = CAS(os.path.join(self.root, "cas5"), algo="md5")
+        cas.digest(self.link)
+        self.assertEqual(cas.stats["from_annex"], 0)
+        cas.close()
