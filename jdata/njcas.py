@@ -104,7 +104,7 @@ def annex_key_info(key):
     }
 
 
-def cas_url(digest, size=None, db=None, doc=None, file=None, base=None, algo="sha256"):
+def cas_url(digest, size=None, db=None, doc=None, file=None, base=None, algo="sha256", enc=None):
     """Build the immutable ``_DataLink_`` URL for a stored object.
 
     Only ``hash`` is authoritative.  ``db``/``doc``/``file``/``size`` are
@@ -122,6 +122,9 @@ def cas_url(digest, size=None, db=None, doc=None, file=None, base=None, algo="sh
     if doc:
         parts.append("doc=" + urllib.parse.quote(str(doc), safe=""))
     parts.append("hash=%s:%s" % (algo, digest))
+    if enc:
+        # names the derived encoding stored beside the source content
+        parts.append("enc=" + urllib.parse.quote(str(enc), safe="._"))
     if size is not None:
         parts.append("size=%d" % int(size))
     if file:
@@ -194,6 +197,8 @@ class CAS:
             "already": 0,
             "memo_errors": 0,
             "from_annex": 0,
+            "encoded": 0,
+            "encoded_bytes": 0,
         }
         self._statlock = threading.Lock()
         os.makedirs(self.objroot, exist_ok=True)
@@ -313,11 +318,65 @@ class CAS:
 
     # -- object paths -------------------------------------------------------
 
-    def objpath(self, digest):
-        return os.path.join(self.objroot, digest[0:2], digest[2:4], digest)
+    def objpath(self, digest, suffix=""):
+        """Path of an object, optionally of a named derivative of it.
 
-    def has(self, digest):
-        return os.path.exists(self.objpath(digest))
+        ``suffix`` names a *derived* encoding of the same content -- e.g.
+        ``_zlib.bnii`` for the binary JData re-encoding of a NIfTI volume.  The
+        derivative sits beside the original under the source content's digest,
+        so it can be found from the source alone and two dataset versions
+        sharing a file share its attachment too.
+        """
+        return os.path.join(self.objroot, digest[0:2], digest[2:4], digest + suffix)
+
+    def has(self, digest, suffix=""):
+        return os.path.exists(self.objpath(digest, suffix))
+
+    def put_derived(self, digest, payload, suffix):
+        """Store a derived encoding named ``<digest><suffix>``.
+
+        Returns ``(size, created)``.  Idempotent: an attachment already present
+        is left alone, so re-converting an unchanged dataset re-encodes nothing.
+        """
+        dest = self.objpath(digest, suffix)
+        if os.path.exists(dest):
+            with self._statlock:
+                self.stats["already"] += 1
+            return os.path.getsize(dest), False
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        tmp = dest + ".tmp.%d.%d" % (os.getpid(), threading.get_ident())
+        try:
+            with open(tmp, "wb") as fid:
+                fid.write(payload)
+            os.replace(tmp, dest)
+            with self._statlock:
+                self.stats["encoded"] += 1
+                self.stats["encoded_bytes"] += len(payload)
+        except FileExistsError:
+            pass
+        finally:
+            if os.path.lexists(tmp):
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+        return len(payload), True
+
+    def hashfile_with(self, path, algo):
+        """Stream-hash a file with an explicit algorithm."""
+        engine = hashlib.new(algo)
+        size = 0
+        with open(path, "rb") as fid:
+            while True:
+                chunk = fid.read(_READ_CHUNK)
+                if not chunk:
+                    break
+                size += len(chunk)
+                engine.update(chunk)
+        with self._statlock:
+            self.stats["hashed"] += 1
+            self.stats["bytes_hashed"] += size
+        return engine.hexdigest(), size
 
     # -- hashing ------------------------------------------------------------
 

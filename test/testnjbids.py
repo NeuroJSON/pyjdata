@@ -24,12 +24,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import re
 import collections
+import hashlib
 
 import numpy as np
 
 from jdata.njcas import CAS
 from jdata.njbids import (
     FileInfo,
+    NJBIDS_DEFAULT,
     bids2json,
     strip_trailing_commas,
     canonical_json,
@@ -711,19 +713,20 @@ class TestFileLevelParallelism(unittest.TestCase):
             serial.close()
             parallel.close()
 
-    def test_prehash_targets_only_annexed_payloads(self):
-        """A non-annex tree has nothing to pre-hash, so the pass is a no-op."""
-        from jdata.njbids import _prehash, _walk
+    def test_prefetch_registers_nothing_for_a_non_annex_tree(self):
+        """Nothing to register, though sidecars are still warmed."""
+        from jdata.njbids import _prefetch, _walk
 
         cas = CAS(os.path.join(self.root, "cas3"), commit_every=1)
         try:
-            self.assertEqual(_prehash(_walk(self.ds), cas, 4), 0)
+            _prefetch(_walk(self.ds), cas, 4, NJBIDS_DEFAULT)
             self.assertEqual(cas.stats["hashed"], 0)
+            self.assertEqual(cas.stats["linked"], 0)
         finally:
             cas.close()
 
-    def test_prehash_registers_annexed_files(self):
-        from jdata.njbids import _prehash
+    def test_prefetch_registers_annexed_files(self):
+        from jdata.njbids import _prefetch
 
         cas = CAS(os.path.join(self.root, "cas4"), commit_every=1)
         try:
@@ -742,13 +745,13 @@ class TestFileLevelParallelism(unittest.TestCase):
                 if not os.path.lexists(link):
                     os.symlink(os.path.relpath(target, os.path.dirname(link)), link)
                 files.append(_walk_one(link, "f%d.bin" % i))
-            self.assertEqual(_prehash(files, cas, 4), 6)
+            self.assertEqual(_prefetch(files, cas, 4, NJBIDS_DEFAULT), 6)
             self.assertEqual(cas.memo_count(), 6)
         finally:
             cas.close()
 
-    def test_dangling_links_are_skipped_by_prehash(self):
-        from jdata.njbids import _prehash
+    def test_dangling_links_are_skipped_by_prefetch(self):
+        from jdata.njbids import _prefetch
 
         cas = CAS(os.path.join(self.root, "cas5"), commit_every=1)
         try:
@@ -757,7 +760,7 @@ class TestFileLevelParallelism(unittest.TestCase):
                 "../.git/annex/objects/aa/bb/MD5E-s9--%032d.bin/MD5E-s9--%032d.bin" % (0, 0),
                 link,
             )
-            self.assertEqual(_prehash([_walk_one(link, "gone.bin")], cas, 2), 0)
+            self.assertEqual(_prefetch([_walk_one(link, "gone.bin")], cas, 2, NJBIDS_DEFAULT), 0)
         finally:
             cas.close()
 
@@ -932,3 +935,136 @@ class TestBudgetIsStrict(unittest.TestCase):
         two = bids2json(self.ds, **args)
         self.assertEqual(one["fingerprint"], two["fingerprint"])
         self.assertEqual(canonical_json(one["doc"]), canonical_json(two["doc"]))
+
+
+class TestAttachmentEncoding(unittest.TestCase):
+    """Re-encoding a modality payload into a binary JData attachment.
+
+    The digest keeps the header inline and searchable; the bulk arrays are
+    written out as a compressed BJData document and referenced by content hash.
+    The attachment is named ``<sha256 of the source>_<codec><ext>`` -- named by
+    the source rather than by the encoded output, so the name survives a change
+    of encoder or compression settings and two dataset versions sharing a file
+    share one attachment.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.root = tempfile.mkdtemp()
+        cls.ds = os.path.join(cls.root, "dsE")
+        make_bids(cls.ds, subjects=("01",), git=True, derivatives=False)
+        cls.cas = CAS(os.path.join(cls.root, "cas"), algo="sha256", commit_every=1)
+        cls.result = bids2json(
+            cls.ds,
+            dbname="db",
+            dsname="dsE",
+            cas=cls.cas,
+            encode=("nii",),
+            encode_codec="zlib",
+            encode_threads=4,
+        )
+        cls.node = cls.result["doc"]["sub-01"]["anat"]["sub-01_T1w.nii.gz"]
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.cas.close()
+        shutil.rmtree(cls.root, ignore_errors=True)
+
+    def test_header_stays_inline_and_searchable(self):
+        self.assertIn("NIFTIHeader", self.node)
+        header = self.node["NIFTIHeader"]
+        self.assertEqual(list(header["Dim"]), [4, 4, 2])
+        self.assertEqual([round(v, 3) for v in header["VoxelSize"]], [2.0, 2.0, 3.0])
+
+    def test_bulk_data_becomes_a_link_with_a_jsonpath(self):
+        link = self.node["NIFTIData"]["_DataLink_"]
+        self.assertIn("hash=sha256:", link)
+        self.assertIn("enc=_zlib.bnii", link)
+        self.assertTrue(link.endswith(":$.NIFTIData"))
+
+    def test_attachment_is_named_by_the_source_digest(self):
+        link = self.node["NIFTIData"]["_DataLink_"]
+        digest = re.search(r"hash=sha256:([0-9a-f]{64})", link).group(1)
+        source = os.path.join(self.ds, "sub-01", "anat", "sub-01_T1w.nii.gz")
+        with open(source, "rb") as fid:
+            self.assertEqual(digest, hashlib.sha256(fid.read()).hexdigest())
+        self.assertTrue(os.path.exists(self.cas.objpath(digest, "_zlib.bnii")))
+
+    def test_attachment_decodes_to_the_original_voxels(self):
+        from jdata.jfile import loadbs
+        from jdata.jnifti import nii2jnii
+
+        link = self.node["NIFTIData"]["_DataLink_"]
+        digest = re.search(r"hash=sha256:([0-9a-f]{64})", link).group(1)
+        with open(self.cas.objpath(digest, "_zlib.bnii"), "rb") as fid:
+            decoded = loadbs(fid.read())
+        original = nii2jnii(os.path.join(self.ds, "sub-01", "anat", "sub-01_T1w.nii.gz"))
+        self.assertTrue(
+            np.array_equal(np.asarray(decoded["NIFTIData"]), np.asarray(original["NIFTIData"]))
+        )
+
+    def test_metadata_block_records_the_scheme(self):
+        meta = self.result["doc"][".neurojson"]
+        self.assertEqual(meta["Encoded"], ["nii"])
+        self.assertEqual(meta["EncodeCodec"], "zlib")
+        self.assertEqual(meta["HashAlgorithm"], "sha256")
+
+    def test_manifest_records_both_digests(self):
+        entry = next(e for e in self.result["manifest"] if e["path"].endswith("sub-01_T1w.nii.gz"))
+        self.assertEqual(entry["attachment"], "_zlib.bnii")
+        self.assertEqual(len(entry["attachment_sha256"]), 64)
+        self.assertNotEqual(entry["attachment_sha256"], entry["sha256"])
+
+    def test_re_encoding_is_deterministic(self):
+        again = bids2json(
+            self.ds,
+            dbname="db",
+            dsname="dsE",
+            cas=self.cas,
+            encode=("nii",),
+            encode_codec="zlib",
+            encode_threads=16,
+        )
+        self.assertEqual(again["fingerprint"], self.result["fingerprint"])
+        self.assertEqual(canonical_json(again["doc"]), canonical_json(self.result["doc"]))
+
+    def test_existing_attachment_is_not_rewritten(self):
+        before = self.cas.stats["encoded"]
+        bids2json(
+            self.ds,
+            dbname="db",
+            dsname="dsE",
+            cas=self.cas,
+            encode=("nii",),
+            encode_codec="zlib",
+        )
+        self.assertEqual(self.cas.stats["encoded"], before)
+
+    def test_encoding_off_by_default_references_the_original(self):
+        plain = bids2json(self.ds, dbname="db", dsname="dsE", cas=self.cas)
+        link = plain["doc"]["sub-01"]["anat"]["sub-01_T1w.nii.gz"]["NIFTIData"]["_DataLink_"]
+        self.assertNotIn("enc=", link)
+        self.assertNotIn("Encoded", plain["doc"][".neurojson"])
+
+    def test_size_cap_skips_large_payloads(self):
+        capped = bids2json(
+            self.ds,
+            dbname="db",
+            dsname="dsE",
+            cas=self.cas,
+            encode=("nii",),
+            max_encode=16,
+        )
+        link = capped["doc"]["sub-01"]["anat"]["sub-01_T1w.nii.gz"]["NIFTIData"]["_DataLink_"]
+        self.assertNotIn("enc=", link)
+
+    def test_unparseable_payload_falls_back_to_a_reference(self):
+        broken = os.path.join(self.root, "dsBroken")
+        make_bids(broken, subjects=("01",), git=True, derivatives=False)
+        target = os.path.join(broken, "sub-01", "anat", "sub-01_T1w.nii.gz")
+        with open(target, "wb") as fid:
+            fid.write(b"definitely not a nifti")
+        result = bids2json(broken, dbname="db", dsname="dsBroken", cas=self.cas, encode=("nii",))
+        node = result["doc"]["sub-01"]["anat"]["sub-01_T1w.nii.gz"]
+        self.assertIn("_DataLink_", node)
+        self.assertTrue(result["errors"])

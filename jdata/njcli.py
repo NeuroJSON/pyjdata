@@ -174,12 +174,18 @@ def cmd_convert(args):
     # both the content hash and the exact size, and hardlinking is a metadata
     # operation -- the whole pass then needs no payload reads at all.  Choosing
     # sha256 instead means reading every byte of the mirror once.
-    algo, annex_hash = ("md5", True) if args.content_hash == "annex" else ("sha256", False)
+    # Re-encoding names its attachments by the sha256 of the source, and it has
+    # to read every payload anyway, so one uniform algorithm costs nothing extra
+    # and avoids a document that mixes md5 links with sha256 attachments.
+    content_hash = args.content_hash
+    if args.encode and content_hash == "annex" and not args.keep_annex_hash:
+        content_hash = "sha256"
+    algo, annex_hash = ("md5", True) if content_hash == "annex" else ("sha256", False)
     options = {
         "cas_mode": args.cas_mode,
         "cas_algo": algo,
         "cas_annex_hash": annex_hash,
-        "njbids": {"hash_algorithm": algo, "hash_source": args.content_hash},
+        "njbids": {"hash_algorithm": algo, "hash_source": content_hash},
     }
     if args.max_doc:
         options["njbids"]["max_doc"] = args.max_doc
@@ -187,6 +193,12 @@ def cmd_convert(args):
         options["njbids"]["cas_url"] = args.cas_url
     if args.file_threads:
         options["njbids"]["hash_threads"] = args.file_threads
+    if args.encode:
+        options["njbids"]["encode"] = tuple(args.encode)
+        options["njbids"]["encode_codec"] = args.encode_codec
+        options["njbids"]["encode_threads"] = args.encode_threads
+    if args.max_encode:
+        options["njbids"]["max_encode"] = args.max_encode
     if args.no_split:
         options["njbids"]["split_dirs"] = ()
 
@@ -741,6 +753,35 @@ def build_parser():
         help="threads used to pre-hash payloads within one dataset; useful when "
         "converting a handful of very large datasets, where per-dataset "
         "parallelism leaves most of the pool idle",
+    )
+    conv.add_argument(
+        "--encode",
+        nargs="*",
+        choices=["nii", "snirf", "gii", "mat"],
+        help="re-encode these modality payloads into binary JData attachments "
+        "named <sha256>_<codec>.<bnii|bnirs|bgii|jdb>, instead of referencing "
+        "the original file. Requires reading (and rewriting) every payload.",
+    )
+    conv.add_argument(
+        "--encode-codec",
+        default="zlib",
+        choices=["zlib", "lzma", "lz4", "blosc2zstd", "blosc2lz4", "none"],
+        help="compression inside the attachment (default zlib; blosc2zstd is "
+        "both smaller and faster)",
+    )
+    conv.add_argument(
+        "--encode-threads",
+        type=int,
+        default=1,
+        help="threads used inside the compressor for one attachment; zlib is "
+        "parallelised block-wise, so this scales nearly linearly",
+    )
+    conv.add_argument("--max-encode", type=int, help="skip payloads larger than this")
+    conv.add_argument(
+        "--keep-annex-hash",
+        action="store_true",
+        help="with --encode, keep annex-derived md5 identifiers for files that are "
+        "not re-encoded, instead of promoting everything to sha256",
     )
     conv.add_argument("--max-doc", type=int, help="document size budget in bytes")
     conv.add_argument("--no-split", action="store_true", help="keep derivatives in the main doc")

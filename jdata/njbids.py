@@ -74,6 +74,15 @@ NJBIDS_DEFAULT = {
     # its identifiers and therefore its fingerprint
     "hash_algorithm": "sha256",
     "hash_source": "sha256",
+    # re-encode modality payloads into binary JData attachments.  Empty means
+    # reference the original file instead, which costs no read.
+    "encode": (),
+    "encode_codec": "zlib",
+    # threads used inside the compressor for one attachment; zlib is
+    # parallelised block-wise (see jdata.zlibmt) so this scales nearly linearly
+    "encode_threads": 1,
+    # do not re-encode a payload larger than this (0 = no limit)
+    "max_encode": 0,
 }
 
 _TEXT_BASENAMES = ("README", "CHANGES", "LICENSE", "CITATION", "AUTHORS", "TASK")
@@ -530,6 +539,82 @@ class _Converter:
 
         return self._safe_link(path, relpath, "binary", "link")
 
+    def _attachment_link(self, path, relpath, kind, ext, info, jsonpath=None):
+        """Re-encode a payload as a binary JData attachment and link to it.
+
+        Returns the ``_DataLink_`` node, or None if this file should be
+        referenced as-is.  Deliberately does **not** build the inlined header:
+        that stays the responsibility of the format handler, which uses the same
+        header-only reader whether or not an attachment already exists.  Letting
+        this method produce the header instead meant a cached attachment took a
+        different code path from a fresh one and yielded a different document --
+        and therefore a different fingerprint -- on the second run.
+
+        The attachment is named ``<sha256 of the source>_<codec><ext>``.  Naming
+        by the source rather than the encoded output keeps the name stable
+        across a change of encoder or compression settings, and lets two dataset
+        versions that share a file share one attachment.
+        """
+        from .njencode import encode_attachment, encoder_for, payload_digest
+
+        spec = encoder_for(ext)
+        if spec is None or not info.present:
+            return None
+        limit = int(self.config.get("max_encode") or 0)
+        if limit and info.size > limit:
+            self._count("encode-too-large")
+            return None
+
+        codec = self.config.get("encode_codec") or "zlib"
+        entry = self._register(path, relpath, kind, store=False, info=info)
+
+        # the attachment name is a sha256 of the source whatever the store's own
+        # algorithm is, so compute it explicitly when they differ
+        source = entry.get("sha256")
+        if self.cas.algo != "sha256" or not source:
+            source, _size = self.cas.hashfile_with(path, "sha256")
+            entry["sha256_source"] = source
+
+        attach_ext = spec[0]
+        suffix = ("_%s%s" % (codec, attach_ext)) if codec else attach_ext
+
+        if self.cas.has(source, suffix):
+            size = os.path.getsize(self.cas.objpath(source, suffix))
+            self._count("encoded-cached")
+        else:
+            try:
+                _header, payload, attach_ext, _keys = encode_attachment(
+                    path,
+                    ext,
+                    compression=codec,
+                    nthread=int(self.config.get("encode_threads") or 1),
+                )
+            except Exception as err:
+                self.errors.append(
+                    "%s: could not re-encode: %s: %s" % (relpath, type(err).__name__, err)
+                )
+                self._count("encode-failed")
+                return None
+            size, _created = self.cas.put_derived(source, payload, suffix)
+            entry["attachment_sha256"] = payload_digest(payload)
+            self._count("encoded")
+
+        entry["attachment"] = suffix
+        entry["attachment_size"] = size
+        url = cas_url(
+            source,
+            size=size,
+            db=self.dbname,
+            doc=self.dsname,
+            file=relpath,
+            base=self.config.get("cas_url"),
+            algo="sha256",
+            enc=suffix,
+        )
+        if jsonpath:
+            url += ":$." + jsonpath
+        return {"_DataLink_": url}
+
     def _safe_link(self, path, relpath, kind, counter):
         """Register and link a file, tolerating an unreadable payload.
 
@@ -633,7 +718,14 @@ class _Converter:
             self._count("nifti-headerfail")
             return self._link(entry)
         jnii = {k: v for k, v in jnii.items() if k != "NIFTIData"}
-        jnii["NIFTIData"] = self._link(entry)
+        attached = (
+            self._attachment_link(
+                path, relpath, "nifti", fileext(relpath), self._info, jsonpath="NIFTIData"
+            )
+            if "nii" in self.config.get("encode", ())
+            else None
+        )
+        jnii["NIFTIData"] = attached if attached is not None else self._link(entry)
         self._count("nifti")
         return jnii
 
@@ -641,6 +733,14 @@ class _Converter:
         from .jgifti import gii2jgii
 
         entry = self._register(path, relpath, "gifti", info=self._info)
+        attached = (
+            self._attachment_link(path, relpath, "gifti", ".gii", self._info)
+            if "gii" in self.config.get("encode", ())
+            else None
+        )
+        if attached is not None:
+            self._count("gifti-encoded")
+            return {"GIFTIObject": attached}
         if size > self.config["max_json"]:
             jgii = {"GIFTIObject": self._link(entry)}
             self._count("gifti-linked")
@@ -818,49 +918,74 @@ def _info(entry, root):
     return FileInfo(entry.path, relpath, is_link, present, size, target)
 
 
-def _prehash(files, cas, threads):
-    """Register annexed payloads in the store in parallel, before the walk.
+#: extensions whose contents get inlined, and therefore have to be read
+_INLINE_EXT = frozenset(
+    _TABULAR_EXT + _JSONISH_EXT + _TEXT_EXT + (".bval", ".bvec", ".vhdr", ".vmrk")
+)
+
+
+def _prefetch(files, cas, threads, config):
+    """Warm and register a dataset's files in parallel, before the walk.
+
+    Two costs are overlapped here, and both are latency rather than bandwidth:
+
+    * **Small-file reads.**  Inlining metadata means opening every ``.json`` and
+      ``.tsv`` sidecar, and on spinning disks each of those is an independent
+      seek.  Measured on ds002785, 4290 sidecars accounted for 57 of the
+      dataset's 61 seconds -- about 13 ms each, which is seek time, not work.
+      Reading them concurrently lets the queue depth hide the latency; the data
+      lands in the filesystem cache and the sequential pass then hits it warm.
+    * **Store registration** for annexed payloads.
 
     Parallelism in the pipeline is otherwise per dataset, which is the wrong
-    granularity at the tail of a run: the largest datasets hold six figures of
-    files, so one worker hashes them serially while the rest of the pool idles.
+    granularity for the largest ones: they hold six figures of files, so one
+    worker walks them serially while the rest of the pool idles.
 
-    Only files with a git-annex key are pre-hashed.  Reading the key is a
-    readlink, not a payload read, and annex holds exactly the large binaries
-    (``annex.largefiles`` selects on binary mime encoding), so this targets the
-    files whose hashing actually costs something and leaves small sidecars to
-    the sequential pass, where re-hashing them is trivial.
-
-    Determinism is unaffected: this only populates the hash memo and the store.
-    The document is still built by the ordered sequential walk.
+    Determinism is unaffected.  This only warms the cache and populates the
+    store; the document is still built by the ordered sequential walk.
     """
     from concurrent.futures import ThreadPoolExecutor
 
-    targets = []
+    ceiling = max(
+        int(config.get("max_json") or 0),
+        int(config.get("max_tsv") or 0),
+        int(config.get("max_text") or 0),
+    )
+
+    register, warm = [], []
     for info in files:
         if info.dangling:
-            continue  # content never fetched; nothing to hash
-        key = annex_key_from_target(info.target) if info.is_link else None
-        if key:
-            targets.append((info.path, key))
-    if not targets:
+            continue  # content never fetched; nothing to read or hash
+        if info.is_link:
+            key = annex_key_from_target(info.target)
+            if key:
+                register.append((info.path, key))
+                continue
+        if 0 < info.size <= ceiling and fileext(info.relpath) in _INLINE_EXT:
+            warm.append(info.path)
+    if not (register or warm):
         return 0
 
-    def work(item):
+    def do_register(item):
         path, key = item
         try:
             cas.put(path, key=key)
-            return None
-        except OSError as err:
-            return "%s: %s" % (path, err)
+        except OSError:
+            pass
 
-    errors = []
+    def do_warm(path):
+        # the read is for its side effect on the filesystem cache
+        try:
+            with open(path, "rb") as fid:
+                fid.read(1 << 20)
+        except OSError:
+            pass
+
     with ThreadPoolExecutor(max_workers=threads) as pool:
-        for problem in pool.map(work, targets):
-            if problem:
-                errors.append(problem)
+        list(pool.map(do_register, register))
+        list(pool.map(do_warm, warm))
     cas.flush()
-    return len(targets)
+    return len(register) + len(warm)
 
 
 def _load_description(dspath):
@@ -918,7 +1043,7 @@ def bids2json(dspath, dbname=None, dsname=None, cas=None, casroot=None, **kwargs
     files = _walk(dspath)
     hash_threads = int(config.get("hash_threads") or 1)
     if hash_threads > 1:
-        _prehash(files, cas, hash_threads)
+        _prefetch(files, cas, hash_threads, config)
 
     doc = {}
     split = {name: {} for name in split_dirs}
@@ -989,6 +1114,9 @@ def bids2json(dspath, dbname=None, dsname=None, cas=None, casroot=None, **kwargs
         "HashAlgorithm": cas.algo,
         "HashSource": config.get("hash_source") or cas.algo,
     }
+    if config.get("encode"):
+        doc[".neurojson"]["Encoded"] = sorted(config["encode"])
+        doc[".neurojson"]["EncodeCodec"] = config.get("encode_codec") or "zlib"
     if version.get("DatasetDOI"):
         doc[".neurojson"]["DatasetDOI"] = version["DatasetDOI"]
 
