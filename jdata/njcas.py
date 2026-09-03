@@ -350,6 +350,46 @@ class CAS:
                     pass
         return digest, size
 
+    def put_bytes(self, data):
+        """Register an in-memory payload; returns ``(digest, size)``.
+
+        Used for content the pipeline generates rather than finds on disk --
+        an offloaded subtree of a document, or a manifest.  Such an object is
+        necessarily a real file rather than a hardlink, but they are small and
+        few compared with the corpus.
+        """
+        if isinstance(data, str):
+            data = data.encode("utf-8")
+        digest = hashlib.new(self.algo, data).hexdigest()
+        size = len(data)
+        with self._statlock:
+            self.stats["hashed"] += 1
+            self.stats["bytes_hashed"] += size
+        if self.mode == "none":
+            return digest, size
+        dest = self.objpath(digest)
+        if os.path.exists(dest):
+            with self._statlock:
+                self.stats["already"] += 1
+            return digest, size
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        tmp = dest + ".tmp.%d.%d" % (os.getpid(), threading.get_ident())
+        try:
+            with open(tmp, "wb") as fid:
+                fid.write(data)
+            os.replace(tmp, dest)
+            with self._statlock:
+                self.stats["linked"] += 1
+        except FileExistsError:
+            pass
+        finally:
+            if os.path.lexists(tmp):
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+        return digest, size
+
     def url(self, digest, size=None, db=None, doc=None, file=None, base=None):
         return cas_url(digest, size=size, db=db, doc=doc, file=file, base=base, algo=self.algo)
 

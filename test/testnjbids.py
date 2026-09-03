@@ -22,6 +22,8 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import re
+
 import numpy as np
 
 from jdata.njcas import CAS
@@ -524,3 +526,120 @@ class TestMalformedInputs(unittest.TestCase):
         result = self._convert()
         self.assertEqual(result["errors"], [])
         self.assertEqual(result["doc"]["sub-01"]["anat"]["sub-01_T1w.json"], {})
+
+
+class TestBudgetTierTwo(unittest.TestCase):
+    """A document can exceed the budget on links alone.
+
+    Some datasets hold six figures of files.  At a couple of hundred bytes per
+    ``_DataLink_`` that is past any document limit before a single byte of
+    inline content is counted, so offloading leaf payloads cannot help and whole
+    subtrees have to be shed instead.  What must never be shed is the
+    dataset-level metadata that makes the document findable.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.root = tempfile.mkdtemp()
+        cls.ds = os.path.join(cls.root, "dsT2")
+        make_bids(cls.ds, subjects=("01",), git=True, derivatives=False)
+        # many link-only files across several subjects
+        for sub in ("02", "03", "04"):
+            for i in range(60):
+                path = os.path.join(
+                    cls.ds,
+                    "sub-%s" % sub,
+                    "func",
+                    "sub-%s_task-rest_run-%03d_bold.nii.gz" % (sub, i),
+                )
+                make_nifti(path, dims=(2, 2, 2))
+        cls.cas = CAS(os.path.join(cls.root, "cas"), commit_every=1)
+        cls.result = bids2json(cls.ds, dbname="db", dsname="dsT2", cas=cls.cas, max_doc=4000)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.cas.close()
+        shutil.rmtree(cls.root, ignore_errors=True)
+
+    def test_document_fits_the_budget(self):
+        self.assertLessEqual(len(canonical_json(self.result["doc"])), 4000)
+
+    def test_subtrees_were_offloaded(self):
+        kinds = {item["how"] for item in self.result["stats"]["offloaded"]}
+        self.assertIn("subtree", kinds)
+
+    def test_dataset_level_metadata_is_never_offloaded(self):
+        doc = self.result["doc"]
+        self.assertIsInstance(doc["dataset_description.json"], dict)
+        self.assertIn("Name", doc["dataset_description.json"])
+        self.assertIn("participant_id", doc["participants.tsv"])
+        self.assertIsInstance(doc["README"], str)
+        self.assertIn("Fingerprint", doc[".neurojson"])
+
+    def test_offloaded_subtree_is_retrievable_from_the_store(self):
+        offloaded = [i for i in self.result["stats"]["offloaded"] if i["how"] == "subtree"]
+        self.assertTrue(offloaded)
+        key = offloaded[0]["path"]
+        node = self.result["doc"][key]
+        self.assertEqual(list(node), ["_DataLink_"])
+        match = re.search(r"hash=sha256:([0-9a-f]{64})", node["_DataLink_"])
+        self.assertTrue(match)
+        stored = self.cas.objpath(match.group(1))
+        self.assertTrue(os.path.exists(stored))
+        with open(stored, encoding="utf-8") as fid:
+            recovered = json.load(fid)
+        # the full subtree really is in there, not a truncation
+        self.assertIsInstance(recovered, dict)
+        self.assertTrue(recovered)
+
+    def test_offload_selection_is_deterministic(self):
+        again = bids2json(self.ds, dbname="db", dsname="dsT2", cas=self.cas, max_doc=4000)
+        self.assertEqual(
+            [i["path"] for i in again["stats"]["offloaded"]],
+            [i["path"] for i in self.result["stats"]["offloaded"]],
+        )
+        self.assertEqual(again["fingerprint"], self.result["fingerprint"])
+
+
+class TestSplitDocumentBudget(unittest.TestCase):
+    """Split documents are published too, so they get the same budget."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.root = tempfile.mkdtemp()
+        cls.ds = os.path.join(cls.root, "dsSB")
+        make_bids(cls.ds, subjects=("01",), git=True, derivatives=True)
+        for pipeline in ("fmriprep", "freesurfer"):
+            for i in range(50):
+                make_nifti(
+                    os.path.join(
+                        cls.ds,
+                        "derivatives",
+                        pipeline,
+                        "sub-01",
+                        "sub-01_run-%03d_desc-preproc_bold.nii.gz" % i,
+                    ),
+                    dims=(2, 2, 2),
+                )
+        cls.cas = CAS(os.path.join(cls.root, "cas"), commit_every=1)
+        cls.result = bids2json(cls.ds, dbname="db", dsname="dsSB", cas=cls.cas, max_doc=3000)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.cas.close()
+        shutil.rmtree(cls.root, ignore_errors=True)
+
+    def test_split_document_also_fits_the_budget(self):
+        deriv = self.result["split"]["derivatives"]
+        self.assertLessEqual(len(canonical_json(deriv)), 3000)
+
+    def test_split_offloads_are_recorded_separately(self):
+        self.assertIn("split_offloaded", self.result["stats"])
+        self.assertIn("derivatives", self.result["stats"]["split_offloaded"])
+
+    def test_offloaded_pipeline_is_a_resolvable_link(self):
+        deriv = self.result["split"]["derivatives"]
+        linked = [k for k, v in deriv.items() if isinstance(v, dict) and "_DataLink_" in v]
+        self.assertTrue(linked)
+        match = re.search(r"hash=sha256:([0-9a-f]{64})", deriv[linked[0]]["_DataLink_"])
+        self.assertTrue(os.path.exists(self.cas.objpath(match.group(1))))

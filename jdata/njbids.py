@@ -710,6 +710,19 @@ def bids2json(dspath, dbname=None, dsname=None, cas=None, casroot=None, **kwargs
     doc, offloaded = _apply_budget(doc, conv, config)
     stats["offloaded"] = offloaded
 
+    # split documents are published too, so they get the same budget.  Their
+    # subtrees are already link-only, so in practice tier 2 does the work: a
+    # 380k-file derivatives tree is past the budget on links alone.
+    split_offloaded = {}
+    for name in list(split):
+        if not split[name]:
+            continue
+        split[name], dropped = _apply_budget(split[name], conv, config, protected=(), label=name)
+        if dropped:
+            split_offloaded[name] = dropped
+    if split_offloaded:
+        stats["split_offloaded"] = split_offloaded
+
     fpr, blob = fingerprint(doc, conv.manifest)
     doc[".neurojson"] = {
         "Version": version["Version"],
@@ -735,12 +748,61 @@ def bids2json(dspath, dbname=None, dsname=None, cas=None, casroot=None, **kwargs
     }
 
 
-def _apply_budget(doc, conv, config):
-    """Offload the largest inline payloads until the document fits its budget.
+#: never offloaded: these carry the dataset-level metadata that makes a document
+#: discoverable and its participants searchable at all
+BUDGET_PROTECTED = (
+    ".neurojson",
+    "dataset_description.json",
+    "participants.tsv",
+    "participants.json",
+    "README",
+    "README.md",
+    "README.rst",
+    "CHANGES",
+    "CITATION.cff",
+    "LICENSE",
+)
 
-    Candidates are ordered by ``(-serialised size, key path)`` so the choice is
-    a deterministic function of the input: two runs over the same dataset
-    offload exactly the same set, which is what keeps the fingerprint stable.
+
+def _offload_node(doc, keypath, conv, label):
+    """Replace a document subtree with a link to it, stored in the CAS."""
+    node = _getpath(doc, list(keypath))
+    payload = canonical_json(node)
+    digest, size = conv.cas.put_bytes(payload)
+    link = {
+        "_DataLink_": cas_url(
+            digest,
+            size=size,
+            db=conv.dbname,
+            doc=conv.dsname,
+            file="%s.json" % "/".join(keypath),
+            base=conv.config.get("cas_url"),
+        )
+    }
+    _setpath(doc, list(keypath), link)
+    return link, len(payload), {"path": "/".join(keypath), "was": len(payload), "how": label}
+
+
+def _apply_budget(doc, conv, config, protected=BUDGET_PROTECTED, label="main"):
+    """Shrink a document to its size budget, deterministically.
+
+    Two tiers, applied in order:
+
+    1. inline leaf payloads -- a large table or sidecar whose content is in the
+       document -- are replaced by a link to the original file;
+    2. whole top-level subtrees (a subject directory, or a derivative pipeline)
+       are serialised into the store and replaced by a link.
+
+    The second tier exists because the first cannot always be enough: a dataset
+    of 177k files is past the budget even when every single file is already
+    nothing but a link, and no amount of leaf offloading helps.  Something has
+    to give, so what gives is per-file detail for the largest subtrees, while
+    the dataset-level metadata that makes the document findable -- description,
+    participants table, README -- is never touched.
+
+    Candidates are ordered by ``(-serialised size, key)`` in both tiers, so the
+    set that gets offloaded is a function of the input alone and the resulting
+    fingerprint stays reproducible.
     """
     budget = config.get("max_doc") or 0
     offloaded = []
@@ -751,9 +813,12 @@ def _apply_budget(doc, conv, config):
     if total <= budget:
         return doc, offloaded
 
+    # tier 1: inline leaf payloads, replaced by a link to the original file
     sized = []
     for is_main, keypath, relpath in conv.inline:
-        if not is_main:
+        if (label == "main") != bool(is_main):
+            continue
+        if keypath and keypath[0] in protected:
             continue
         try:
             node = _getpath(doc, list(keypath))
@@ -773,6 +838,26 @@ def _apply_budget(doc, conv, config):
         link = conv._link(entry)
         _setpath(doc, list(keypath), link)
         total -= nodesize - len(canonical_json(link))
-        offloaded.append({"path": relpath, "was": nodesize})
+        offloaded.append({"path": relpath, "was": nodesize, "how": "leaf"})
+
+    if total <= budget:
+        return doc, offloaded
+
+    # tier 2: whole top-level subtrees, serialised into the store
+    subtrees = []
+    for key, value in doc.items():
+        if key in protected or not isinstance(value, dict):
+            continue
+        if "_DataLink_" in value:
+            continue
+        subtrees.append((len(canonical_json(value)), key))
+    subtrees.sort(key=lambda item: (-item[0], item[1]))
+
+    for nodesize, key in subtrees:
+        if total <= budget:
+            break
+        link, was, record = _offload_node(doc, (key,), conv, "subtree")
+        total -= was - len(canonical_json(link))
+        offloaded.append(record)
 
     return doc, offloaded
