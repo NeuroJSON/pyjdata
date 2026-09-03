@@ -397,22 +397,49 @@ class CAS:
         return h.hexdigest(), size
 
     def annex_digest(self, key):
-        """Return ``(digest, size)`` straight from a git-annex key, or None.
+        """Return ``(digest, size, algo)`` straight from a git-annex key, or None.
 
-        Only accepted when the key's backend hash matches this store's algorithm,
-        so one identifier scheme covers the whole corpus.
+        Any backend whose key embeds a content hash is accepted, not only the
+        one matching this store's own algorithm.  Datasets in a single
+        collection do not agree on a backend -- OpenNeuro has both MD5E and
+        SHA256E -- and insisting on one meant every file under the other backend
+        was read from disk to compute a hash that was already sitting in its
+        symlink target.  Objects are named by their digest and fanned out by its
+        hex prefix, which works for any length, and both the manifest and each
+        URL record the algorithm, so a mixture is unambiguous.
         """
         info = annex_key_info(key)
         if not info or info.get("size") is None:
             return None
-        if self.ANNEX_HASHES.get(info["backend"]) != self.algo:
+        algo = self.ANNEX_HASHES.get(info["backend"])
+        if algo is None:
             return None
         digest = info["hash"].lower()
-        if len(digest) != _HEX_LENGTHS.get(self.algo, 0):
+        if len(digest) != _HEX_LENGTHS.get(algo, 0):
             return None
         if any(ch not in "0123456789abcdef" for ch in digest):
             return None
-        return digest, int(info["size"])
+        return digest, int(info["size"]), algo
+
+    def identify(self, path, key=None, store=False):
+        """Return ``{"digest", "size", "algo"}`` for a file, as cheaply as possible.
+
+        Prefers the hash already present in the git-annex key; falls back to
+        reading and hashing with this store's own algorithm.
+        """
+        if key is None:
+            key = annex_key(path)
+        if self.annex_hash and key:
+            fromkey = self.annex_digest(key)
+            if fromkey:
+                digest, size, algo = fromkey
+                with self._statlock:
+                    self.stats["from_annex"] += 1
+                if store:
+                    self._materialise(path, digest)
+                return {"digest": digest, "size": size, "algo": algo}
+        digest, size = self.put(path, key=key) if store else self.digest(path, key=key)
+        return {"digest": digest, "size": size, "algo": self.algo}
 
     def digest(self, path, key=None):
         """Return ``(digest, size)`` for a file, consulting the memo first.
@@ -425,10 +452,10 @@ class CAS:
             key = annex_key(path)
         if self.annex_hash and key:
             fromkey = self.annex_digest(key)
-            if fromkey:
+            if fromkey and fromkey[2] == self.algo:
                 with self._statlock:
                     self.stats["from_annex"] += 1
-                return fromkey
+                return fromkey[0], fromkey[1]
         cached = self.memo_get(key)
         if cached:
             with self._statlock:
@@ -450,11 +477,18 @@ class CAS:
         digest, size = self.digest(path, key=key)
         if self.mode == "none":
             return digest, size
+        self._materialise(path, digest)
+        return digest, size
+
+    def _materialise(self, path, digest):
+        """Place the payload in the store under ``digest``, if not already there."""
+        if self.mode == "none":
+            return
         dest = self.objpath(digest)
         if os.path.exists(dest):
             with self._statlock:
                 self.stats["already"] += 1
-            return digest, size
+            return
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         src = os.path.realpath(path)
         tmp = dest + ".tmp.%d.%d" % (os.getpid(), threading.get_ident())
@@ -481,7 +515,6 @@ class CAS:
                     os.unlink(tmp)
                 except OSError:
                     pass
-        return digest, size
 
     def put_bytes(self, data):
         """Register an in-memory payload; returns ``(digest, size)``.

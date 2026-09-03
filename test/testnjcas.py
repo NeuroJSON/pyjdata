@@ -463,3 +463,98 @@ class TestAnnexHashMode(unittest.TestCase):
         cas.digest(self.link)
         self.assertEqual(cas.stats["from_annex"], 0)
         cas.close()
+
+
+class TestAnyAnnexBackend(unittest.TestCase):
+    """The store must reuse whatever hash a git-annex key already carries.
+
+    Regression test: the key's digest was only accepted when its backend matched
+    the store's own algorithm, so a collection mixing MD5E and SHA256E (OpenNeuro
+    does) had every file under the other backend read from disk to recompute a
+    hash that was already sitting in its symlink target.  On one dataset that was
+    40.65s for 1500 files instead of 0.51s.
+    """
+
+    ALGOS = {"MD5E": "md5", "SHA256E": "sha256", "SHA1E": "sha1"}
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def _annexed(self, backend, payload, ext=".nii.gz"):
+        digest = hashlib.new(self.ALGOS[backend], payload).hexdigest()
+        key = "%s-s%d--%s%s" % (backend, len(payload), digest, ext)
+        objdir = os.path.join(self.root, ".git", "annex", "objects", "aa", "bb", key)
+        os.makedirs(objdir, exist_ok=True)
+        target = os.path.join(objdir, key)
+        with open(target, "wb") as fid:
+            fid.write(payload)
+        link = os.path.join(self.root, "f_%s%s" % (backend, ext))
+        if not os.path.lexists(link):
+            os.symlink(os.path.relpath(target, os.path.dirname(link)), link)
+        return link, digest
+
+    def test_every_supported_backend_is_reused_without_reading(self):
+        cas = CAS(os.path.join(self.root, "store"), algo="md5", annex_hash=True)
+        try:
+            for backend in ("MD5E", "SHA256E", "SHA1E"):
+                link, digest = self._annexed(backend, b"payload for " + backend.encode())
+                info = cas.identify(link, store=True)
+                self.assertEqual(info["digest"], digest, backend)
+                self.assertEqual(info["algo"], self.ALGOS[backend], backend)
+                self.assertTrue(cas.has(info["digest"]), backend)
+            self.assertEqual(cas.stats["hashed"], 0)
+            self.assertEqual(cas.stats["from_annex"], 3)
+        finally:
+            cas.close()
+
+    def test_object_is_materialised_by_hardlink(self):
+        cas = CAS(os.path.join(self.root, "store2"), algo="md5", annex_hash=True)
+        try:
+            link, digest = self._annexed("SHA256E", b"a payload to hardlink")
+            cas.identify(link, store=True)
+            self.assertGreater(os.stat(cas.objpath(digest)).st_nlink, 1)
+            self.assertEqual(cas.stats["bytes_hashed"], 0)
+        finally:
+            cas.close()
+
+    def test_unhashed_backend_falls_back_to_reading(self):
+        """A URL-backend key carries no content hash, so the payload is read."""
+        cas = CAS(os.path.join(self.root, "store3"), algo="sha256", annex_hash=True)
+        try:
+            payload = b"content behind a URL key"
+            key = "URL--http%3A%2F%2Fexample.invalid%2Ff.nii.gz"
+            objdir = os.path.join(self.root, ".git", "annex", "objects", "cc", "dd", key)
+            os.makedirs(objdir)
+            target = os.path.join(objdir, key)
+            with open(target, "wb") as fid:
+                fid.write(payload)
+            link = os.path.join(self.root, "url.nii.gz")
+            os.symlink(os.path.relpath(target, os.path.dirname(link)), link)
+            info = cas.identify(link, store=True)
+            self.assertEqual(info["algo"], "sha256")
+            self.assertEqual(info["digest"], hashlib.sha256(payload).hexdigest())
+            self.assertEqual(cas.stats["hashed"], 1)
+        finally:
+            cas.close()
+
+    def test_identify_without_storing_does_not_materialise(self):
+        cas = CAS(os.path.join(self.root, "store4"), algo="md5", annex_hash=True)
+        try:
+            link, digest = self._annexed("SHA256E", b"not to be materialised")
+            info = cas.identify(link, store=False)
+            self.assertEqual(info["digest"], digest)
+            self.assertFalse(cas.has(digest))
+        finally:
+            cas.close()
+
+    def test_digest_still_returns_a_pair_for_its_own_algorithm(self):
+        """digest() keeps its two-value contract for existing callers."""
+        cas = CAS(os.path.join(self.root, "store5"), algo="md5", annex_hash=True)
+        try:
+            link, digest = self._annexed("MD5E", b"two value contract")
+            self.assertEqual(cas.digest(link), (digest, len(b"two value contract")))
+        finally:
+            cas.close()

@@ -409,7 +409,7 @@ class _Converter:
             # inflate the file count and corrupt the fingerprint, so
             # registration is idempotent per path.
             if store and not existing.get("stored"):
-                self.cas.put(path, key=existing.get("annexkey") or annex_key(path))
+                self.cas.identify(path, key=existing.get("annexkey") or annex_key(path), store=True)
                 existing["stored"] = True
             return existing
 
@@ -443,13 +443,14 @@ class _Converter:
             self.manifest.append(entry)
             self.manifest_index[relpath] = entry
             return entry
-        if store:
-            digest, size = self.cas.put(path, key=key)
-        else:
-            digest, size = self.cas.digest(path, key=key)
+        # identify() prefers whatever content hash the annex key already carries,
+        # whichever backend produced it, and only reads the payload when there
+        # is none to reuse
+        ident = self.cas.identify(path, key=key, store=store)
+        digest, size = ident["digest"], ident["size"]
         entry = {
             "path": relpath,
-            "algo": self.cas.algo,
+            "algo": ident["algo"],
             "sha256": digest,
             "size": size,
             "kind": kind,
@@ -988,7 +989,7 @@ def _prefetch(files, cas, threads, config):
     def do_register(item):
         path, key = item
         try:
-            cas.put(path, key=key)
+            cas.identify(path, key=key, store=True)
         except OSError:
             pass
 
