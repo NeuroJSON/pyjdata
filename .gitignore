@@ -1,0 +1,12 @@
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# IDE
+.idea/
+
+# benchmark and scratch artifacts
+test/matrix_*
+test/bug_*.py
+test/neuroj_download.py
