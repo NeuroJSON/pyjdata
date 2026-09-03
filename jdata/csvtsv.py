@@ -105,6 +105,13 @@ def load_csv_tsv(
             pass
         file_handle = _open("latin-1", errors)
 
+    # Python's csv module raises _csv.Error("line contains NUL") on a stray
+    # null byte, and Postgres jsonb rejects \u0000 as well, so strip them here
+    # rather than lose the table.  Seen in OpenNeuro events.tsv files.
+    def _denul(handle):
+        for line in handle:
+            yield line.replace("\x00", "")
+
     try:
         # Set up CSV reader parameters
         csv_params = {
@@ -116,7 +123,7 @@ def load_csv_tsv(
 
         if return_dict and header:
             # Use DictReader for dictionary output with headers
-            reader = csv.DictReader(file_handle, **csv_params)
+            reader = csv.DictReader(_denul(file_handle), **csv_params)
 
             # Read all rows
             rows = list(reader)
@@ -140,7 +147,7 @@ def load_csv_tsv(
 
         else:
             # Use regular reader for list output
-            reader = csv.reader(file_handle, **csv_params)
+            reader = csv.reader(_denul(file_handle), **csv_params)
 
             # Read all rows
             rows = list(reader)

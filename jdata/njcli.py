@@ -169,6 +169,8 @@ def cmd_convert(args):
         options["njbids"]["max_doc"] = args.max_doc
     if args.cas_url:
         options["njbids"]["cas_url"] = args.cas_url
+    if args.file_threads:
+        options["njbids"]["hash_threads"] = args.file_threads
     if args.no_split:
         options["njbids"]["split_dirs"] = ()
 
@@ -666,6 +668,13 @@ def build_parser():
     conv.add_argument("--cas-mode", default="link", choices=["link", "symlink", "copy", "none"])
     conv.add_argument("--cas-url", help="base URL template for _DataLink_")
     conv.add_argument("--threads", type=int, default=8, help="parallel datasets")
+    conv.add_argument(
+        "--file-threads",
+        type=int,
+        help="threads used to pre-hash payloads within one dataset; useful when "
+        "converting a handful of very large datasets, where per-dataset "
+        "parallelism leaves most of the pool idle",
+    )
     conv.add_argument("--max-doc", type=int, help="document size budget in bytes")
     conv.add_argument("--no-split", action="store_true", help="keep derivatives in the main doc")
     conv.add_argument("--force", action="store_true", help="rewrite even if unchanged")

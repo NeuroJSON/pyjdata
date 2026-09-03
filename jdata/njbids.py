@@ -49,6 +49,8 @@ __all__ = [
 ]
 
 NJBIDS_DEFAULT = {
+    # threads used to pre-hash annexed payloads within one dataset
+    "hash_threads": 1,
     # inline size ceilings, in bytes of the *source* file
     "max_tsv": 1 << 20,
     "max_json": 1 << 20,
@@ -615,6 +617,51 @@ def _walk(root, skip_hidden=True):
     return out
 
 
+def _prehash(files, cas, threads):
+    """Register annexed payloads in the store in parallel, before the walk.
+
+    Parallelism in the pipeline is otherwise per dataset, which is the wrong
+    granularity at the tail of a run: the largest datasets hold six figures of
+    files, so one worker hashes them serially while the rest of the pool idles.
+
+    Only files with a git-annex key are pre-hashed.  Reading the key is a
+    readlink, not a payload read, and annex holds exactly the large binaries
+    (``annex.largefiles`` selects on binary mime encoding), so this targets the
+    files whose hashing actually costs something and leaves small sidecars to
+    the sequential pass, where re-hashing them is trivial.
+
+    Determinism is unaffected: this only populates the hash memo and the store.
+    The document is still built by the ordered sequential walk.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    targets = []
+    for path, _relpath in files:
+        if os.path.islink(path) and not os.path.exists(path):
+            continue  # content never fetched; nothing to hash
+        key = annex_key(path)
+        if key:
+            targets.append((path, key))
+    if not targets:
+        return 0
+
+    def work(item):
+        path, key = item
+        try:
+            cas.put(path, key=key)
+            return None
+        except OSError as err:
+            return "%s: %s" % (path, err)
+
+    errors = []
+    with ThreadPoolExecutor(max_workers=threads) as pool:
+        for problem in pool.map(work, targets):
+            if problem:
+                errors.append(problem)
+    cas.flush()
+    return len(targets)
+
+
 def _load_description(dspath):
     path = os.path.join(dspath, "dataset_description.json")
     try:
@@ -667,10 +714,15 @@ def bids2json(dspath, dbname=None, dsname=None, cas=None, casroot=None, **kwargs
     split_dirs = tuple(config["split_dirs"])
     linkonly_dirs = tuple(config["linkonly_dirs"])
 
+    files = _walk(dspath)
+    hash_threads = int(config.get("hash_threads") or 1)
+    if hash_threads > 1:
+        _prehash(files, cas, hash_threads)
+
     doc = {}
     split = {name: {} for name in split_dirs}
 
-    for path, relpath in _walk(dspath):
+    for path, relpath in files:
         keys = relpath.split("/")
         top = keys[0]
         if top in split_dirs and len(keys) > 1:

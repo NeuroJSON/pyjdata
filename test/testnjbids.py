@@ -518,6 +518,17 @@ class TestMalformedInputs(unittest.TestCase):
         self.assertIn("participant_id", result["doc"]["participants.tsv"])
         self.assertEqual(len(result["errors"]), 2)
 
+    def test_tsv_containing_nul_bytes_is_parsed(self):
+        """Python's csv raises on a stray NUL, and Postgres jsonb rejects it too."""
+        target = os.path.join(self.ds, "sub-01", "func", "sub-01_task-rest_events.tsv")
+        with open(target, "wb") as fid:
+            fid.write(b"onset\tduration\ttrial_type\n0.0\t1.0\tgo\x00\n2.0\t1.0\tst\x00op\n")
+        result = self._convert()
+        self.assertEqual(result["errors"], [])
+        table = result["doc"]["sub-01"]["func"]["sub-01_task-rest_events.tsv"]
+        self.assertEqual(table["trial_type"], ["go", "stop"])
+        self.assertNotIn("\x00", canonical_json(result["doc"]))
+
     def test_whitespace_only_json_is_treated_as_empty(self):
         """Several OpenNeuro datasets ship one-byte "\\n" sidecar placeholders."""
         target = os.path.join(self.ds, "sub-01", "anat", "sub-01_T1w.json")
@@ -643,3 +654,82 @@ class TestSplitDocumentBudget(unittest.TestCase):
         self.assertTrue(linked)
         match = re.search(r"hash=sha256:([0-9a-f]{64})", deriv[linked[0]]["_DataLink_"])
         self.assertTrue(os.path.exists(self.cas.objpath(match.group(1))))
+
+
+class TestFileLevelParallelism(unittest.TestCase):
+    """Pre-hashing must change performance, never output."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.ds = make_bids(os.path.join(self.root, "dsFP"), subjects=("01", "02"), git=True)
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def test_output_is_identical_with_and_without_prehashing(self):
+        serial = CAS(os.path.join(self.root, "cas1"), commit_every=1)
+        parallel = CAS(os.path.join(self.root, "cas2"), commit_every=1)
+        try:
+            one = bids2json(self.ds, dbname="db", dsname="dsFP", cas=serial, hash_threads=1)
+            two = bids2json(self.ds, dbname="db", dsname="dsFP", cas=parallel, hash_threads=8)
+            self.assertEqual(canonical_json(one["doc"]), canonical_json(two["doc"]))
+            self.assertEqual(one["fingerprint"], two["fingerprint"])
+            self.assertEqual(
+                [e["path"] for e in one["manifest"]], [e["path"] for e in two["manifest"]]
+            )
+            self.assertEqual(
+                [e["sha256"] for e in one["manifest"]], [e["sha256"] for e in two["manifest"]]
+            )
+        finally:
+            serial.close()
+            parallel.close()
+
+    def test_prehash_targets_only_annexed_payloads(self):
+        """A non-annex tree has nothing to pre-hash, so the pass is a no-op."""
+        from jdata.njbids import _prehash, _walk
+
+        cas = CAS(os.path.join(self.root, "cas3"), commit_every=1)
+        try:
+            self.assertEqual(_prehash(_walk(self.ds), cas, 4), 0)
+            self.assertEqual(cas.stats["hashed"], 0)
+        finally:
+            cas.close()
+
+    def test_prehash_registers_annexed_files(self):
+        from jdata.njbids import _prehash
+
+        cas = CAS(os.path.join(self.root, "cas4"), commit_every=1)
+        try:
+            payload_dir = os.path.join(
+                self.root, "annexlike", ".git", "annex", "objects", "aa", "bb"
+            )
+            files = []
+            for i in range(6):
+                key = "MD5E-s%d--%032d.bin" % (10 + i, i)
+                objdir = os.path.join(payload_dir, key)
+                os.makedirs(objdir, exist_ok=True)
+                target = os.path.join(objdir, key)
+                with open(target, "wb") as fid:
+                    fid.write(b"payload%04d" % i)
+                link = os.path.join(self.root, "annexlike", "f%d.bin" % i)
+                if not os.path.lexists(link):
+                    os.symlink(os.path.relpath(target, os.path.dirname(link)), link)
+                files.append((link, "f%d.bin" % i))
+            self.assertEqual(_prehash(files, cas, 4), 6)
+            self.assertEqual(cas.memo_count(), 6)
+        finally:
+            cas.close()
+
+    def test_dangling_links_are_skipped_by_prehash(self):
+        from jdata.njbids import _prehash
+
+        cas = CAS(os.path.join(self.root, "cas5"), commit_every=1)
+        try:
+            link = os.path.join(self.root, "gone.bin")
+            os.symlink(
+                "../.git/annex/objects/aa/bb/MD5E-s9--%032d.bin/MD5E-s9--%032d.bin" % (0, 0),
+                link,
+            )
+            self.assertEqual(_prehash([(link, "gone.bin")], cas, 2), 0)
+        finally:
+            cas.close()
