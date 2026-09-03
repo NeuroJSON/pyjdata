@@ -174,13 +174,19 @@ def cmd_convert(args):
     # both the content hash and the exact size, and hardlinking is a metadata
     # operation -- the whole pass then needs no payload reads at all.  Choosing
     # sha256 instead means reading every byte of the mirror once.
-    # Re-encoding names its attachments by the sha256 of the source, and it has
-    # to read every payload anyway, so one uniform algorithm costs nothing extra
-    # and avoids a document that mixes md5 links with sha256 attachments.
+    # Encoding does not change how *unencoded* files are identified.  An
+    # attachment is named by the sha256 of its source, which the encoder
+    # computes while it reads the payload it is about to re-encode anyway; but
+    # promoting every other file to sha256 as well would mean reading the whole
+    # mirror to hash things that are only ever referenced -- tens of thousands
+    # of JPEGs per dataset, in the worst case observed.  Those keep the hash the
+    # annex key already carries, and the URL states its algorithm, so a document
+    # holding both is self-describing.
     content_hash = args.content_hash
-    if args.encode and content_hash == "annex" and not args.keep_annex_hash:
-        content_hash = "sha256"
-    algo, annex_hash = ("md5", True) if content_hash == "annex" else ("sha256", False)
+    algo = "md5" if content_hash == "annex" else "sha256"
+    # annex-derived hashes stay enabled even for a sha256 store: a SHA256E key
+    # then supplies the digest for free, and only MD5E-keyed files are read.
+    annex_hash = True
     options = {
         "cas_mode": args.cas_mode,
         "cas_algo": algo,
@@ -777,12 +783,6 @@ def build_parser():
         "parallelised block-wise, so this scales nearly linearly",
     )
     conv.add_argument("--max-encode", type=int, help="skip payloads larger than this")
-    conv.add_argument(
-        "--keep-annex-hash",
-        action="store_true",
-        help="with --encode, keep annex-derived md5 identifiers for files that are "
-        "not re-encoded, instead of promoting everything to sha256",
-    )
     conv.add_argument("--max-doc", type=int, help="document size budget in bytes")
     conv.add_argument("--no-split", action="store_true", help="keep derivatives in the main doc")
     conv.add_argument("--force", action="store_true", help="rewrite even if unchanged")

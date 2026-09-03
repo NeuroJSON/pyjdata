@@ -1068,3 +1068,78 @@ class TestAttachmentEncoding(unittest.TestCase):
         node = result["doc"]["sub-01"]["anat"]["sub-01_T1w.nii.gz"]
         self.assertIn("_DataLink_", node)
         self.assertTrue(result["errors"])
+
+
+class TestMixedIdentifierAlgorithms(unittest.TestCase):
+    """Encoding must not force a re-hash of files it does not encode.
+
+    An attachment is named by the sha256 of its source, which the encoder gets
+    while reading the payload it is about to re-encode anyway.  Promoting every
+    *other* file to sha256 as well would mean reading the whole mirror to hash
+    things that are only ever referenced -- in the worst case observed, tens of
+    thousands of JPEGs per dataset.  Those keep whatever hash their annex key
+    already carries, and each URL states its own algorithm, so a document
+    holding both kinds is self-describing.
+    """
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.ds = os.path.join(self.root, "dsMix")
+        make_bids(self.ds, subjects=("01",), git=True, derivatives=False)
+        # a referenced-only payload behind an MD5E annex key
+        self.payload = b"an image payload that is only ever referenced"
+        md5 = hashlib.md5(self.payload).hexdigest()
+        key = "MD5E-s%d--%s.jpg" % (len(self.payload), md5)
+        objdir = os.path.join(self.ds, ".git", "annex", "objects", "aa", "bb", key)
+        os.makedirs(objdir)
+        target = os.path.join(objdir, key)
+        with open(target, "wb") as fid:
+            fid.write(self.payload)
+        link = os.path.join(self.ds, "sub-01", "anat", "sub-01_photo.jpg")
+        os.symlink(os.path.relpath(target, os.path.dirname(link)), link)
+        self.md5 = md5
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def test_referenced_file_keeps_its_annex_hash_without_being_read(self):
+        cas = CAS(os.path.join(self.root, "store"), algo="md5", annex_hash=True, commit_every=1)
+        try:
+            result = bids2json(
+                self.ds, dbname="db", dsname="dsMix", cas=cas, encode=("nii",)
+            )
+            link = result["doc"]["sub-01"]["anat"]["sub-01_photo.jpg"]["_DataLink_"]
+            self.assertIn("hash=md5:%s" % self.md5, link)
+            self.assertEqual(cas.stats["from_annex"], 1)
+        finally:
+            cas.close()
+
+    def test_encoded_attachment_still_uses_sha256(self):
+        cas = CAS(os.path.join(self.root, "store2"), algo="md5", annex_hash=True, commit_every=1)
+        try:
+            result = bids2json(
+                self.ds, dbname="db", dsname="dsMix", cas=cas, encode=("nii",)
+            )
+            link = result["doc"]["sub-01"]["anat"]["sub-01_T1w.nii.gz"]["NIFTIData"][
+                "_DataLink_"
+            ]
+            self.assertIn("hash=sha256:", link)
+            self.assertIn("enc=_zlib.bnii", link)
+        finally:
+            cas.close()
+
+    def test_every_link_states_its_own_algorithm(self):
+        cas = CAS(os.path.join(self.root, "store3"), algo="md5", annex_hash=True, commit_every=1)
+        try:
+            result = bids2json(
+                self.ds, dbname="db", dsname="dsMix", cas=cas, encode=("nii",)
+            )
+            found = 0
+            for match in re.finditer(
+                r"hash=([a-z0-9]+):", canonical_json(result["doc"])
+            ):
+                self.assertIn(match.group(1), ("md5", "sha256"))
+                found += 1
+            self.assertGreater(found, 1)
+        finally:
+            cas.close()
