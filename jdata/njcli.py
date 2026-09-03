@@ -308,31 +308,131 @@ def _iter_published(outputroot, names=None, split_names=None):
         yield dsname, version, docpath, splits
 
 
+def _trim_largest_subtree(docpath, cas, db, ds, cas_url_base=None):
+    """Shed the largest top-level subtree of a document into the store.
+
+    Returns a description of what was shed, or None if nothing remains that may
+    be shed.  The document on disk is rewritten, so the immutable archive keeps
+    matching what was actually published.
+
+    Never sheds the dataset-level metadata that makes a document findable --
+    description, participants table, README, the metadata block -- and always
+    takes the largest remaining subtree, so the result is a function of the
+    document rather than of how many attempts it took to get there.
+    """
+    from .njbids import BUDGET_PROTECTED, canonical_json
+    from .njcas import cas_url
+
+    with open(docpath, "r", encoding="utf-8") as fid:
+        doc = json.load(fid)
+
+    candidates = []
+    for key, value in doc.items():
+        if key in BUDGET_PROTECTED or not isinstance(value, dict):
+            continue
+        if "_DataLink_" in value:
+            continue
+        candidates.append((len(canonical_json(value)), key))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (-item[0], item[1]))
+    was, key = candidates[0]
+
+    digest, size = cas.put_bytes(canonical_json(doc[key]))
+    doc[key] = {
+        "_DataLink_": cas_url(
+            digest,
+            size=size,
+            db=db,
+            doc=ds,
+            file="%s.json" % key,
+            base=cas_url_base,
+            algo=cas.algo,
+        )
+    }
+    _write_atomic(docpath, canonical_json(doc))
+    return {"path": key, "was": was, "now": len(canonical_json(doc))}
+
+
 def cmd_push(args):
+    """Publish digests, trimming any the server rejects as too large.
+
+    A JSON byte count is the wrong thing to budget against: CouchDB limits the
+    *internal* size of a parsed document, and the ratio to JSON depends entirely
+    on content.  Measured against CouchDB 3.4.2 with an 8 MB limit, the largest
+    JSON accepted was 4.19 MB for one big string, 7.23 MB for many short keys,
+    and over 29 MB for a float array.  Rather than guess at that from the
+    client, documents are converted whole and trimmed here, once the server has
+    actually said no.
+    """
     from .njcouch import CouchDB, CouchError
 
     if not _guard_production(args.server, args.allow_production):
         return 1
     couch = CouchDB(args.server, netrc_machine=args.netrc)
+    cas = CAS(args.cas, algo=args.algo) if args.cas else None
 
     items = list(_iter_published(args.output, args.ds))
     print("pushing %d document(s) to %s/%s" % (len(items), couch.url, args.db))
-    ok = failed = 0
+    ok = failed = trimmed = 0
     for dsname, version, docpath, splits in items:
-        try:
-            couch.push_file(args.db, dsname, docpath, design=args.design)
-            for name, path in splits.items():
-                target = args.split_db or ("%s_%s" % (args.db, name.rstrip("s")))
-                couch.push_file(target, dsname, path, design=args.design)
-            ok += 1
-            if args.verbose:
-                print(
-                    "  %-12s %-14s %8.1f kB" % (dsname, version, os.path.getsize(docpath) / 1024.0)
+        notes = []
+        published = False
+        for attempt in range(args.max_trim + 1):
+            try:
+                couch.push_file(args.db, dsname, docpath, design=args.design)
+                published = True
+                break
+            except CouchError as err:
+                # 413/document_too_large is the clean answer a PUT gets; a POST
+                # to an update handler is answered by closing the socket
+                # instead, so a transport failure counts as too-large provided
+                # the server is still there.
+                toolarge = "too_large" in str(err.body) or err.status == 413
+                if not toolarge and err.status == 0 and couch.alive():
+                    toolarge = True
+                if not toolarge:
+                    print("  %-12s FAILED %s %s" % (dsname, err.status, err.body))
+                    break
+                if cas is None:
+                    print("  %-12s too large, and no --cas given to trim into" % dsname)
+                    break
+                if attempt >= args.max_trim:
+                    print("  %-12s still too large after %d trims" % (dsname, args.max_trim))
+                    break
+                shed = _trim_largest_subtree(
+                    docpath, cas, args.db, dsname, cas_url_base=args.cas_url
                 )
-        except CouchError as err:
+                if shed is None:
+                    print("  %-12s too large, nothing left to trim" % dsname)
+                    break
+                trimmed += 1
+                notes.append("%s %.0fkB" % (shed["path"], shed["was"] / 1024.0))
+
+        if not published:
             failed += 1
-            print("  %-12s FAILED %s %s" % (dsname, err.status, err.body))
-    print("%d pushed, %d failed" % (ok, failed))
+            continue
+
+        for name, path in splits.items():
+            target = args.split_db or ("%s_%s" % (args.db, name.rstrip("s")))
+            try:
+                couch.push_file(target, dsname, path, design=args.design)
+            except CouchError as err:
+                print("  %-12s %s push failed %s %s" % (dsname, name, err.status, err.body))
+        ok += 1
+        if args.verbose or notes:
+            print(
+                "  %-12s %-14s %8.1f kB%s"
+                % (
+                    dsname,
+                    version,
+                    os.path.getsize(docpath) / 1024.0,
+                    ("  trimmed: " + ", ".join(notes)) if notes else "",
+                )
+            )
+    if cas:
+        cas.close()
+    print("%d pushed, %d failed, %d subtree(s) trimmed to fit" % (ok, failed, trimmed))
     return 1 if failed else 0
 
 
@@ -800,6 +900,16 @@ def build_parser():
     push.add_argument("--design", default="qq")
     push.add_argument("--netrc", default="neurojson.io", help="netrc machine for credentials")
     push.add_argument("--ds", nargs="*")
+    push.add_argument("--cas", help="content store, needed to hold trimmed subtrees")
+    push.add_argument("--algo", default="md5", choices=["md5", "sha256"])
+    push.add_argument("--cas-url", help="base URL template for _DataLink_")
+    push.add_argument(
+        "--max-trim",
+        type=int,
+        default=8,
+        help="how many times to shed the largest subtree and retry when the "
+        "server rejects a document as too large",
+    )
     push.add_argument("--allow-production", action="store_true")
     push.add_argument("--verbose", action="store_true")
     push.set_defaults(func=cmd_push)

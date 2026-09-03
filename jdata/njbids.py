@@ -63,8 +63,15 @@ NJBIDS_DEFAULT = {
     # element ceiling for inlining an array out of an HDF5/SNIRF container
     "max_h5_elem": 256,
     "max_snirf_elem": 256,
-    # serialised size ceiling for the whole document
-    "max_doc": 7_500_000,
+    # Serialised size ceiling for the whole document.  Zero by default: a JSON
+    # byte count is the wrong control, because CouchDB limits the *internal*
+    # size of a parsed document and the ratio depends entirely on content.
+    # Measured against CouchDB 3.4.2 with an 8 MB limit, the largest JSON
+    # accepted was 4.19 MB for one big string, 7.23 MB for many short keys, and
+    # over 29 MB for a float array -- a sevenfold spread. So documents are
+    # converted whole and trimmed at publish time, when the server has actually
+    # said no.
+    "max_doc": 0,
     # subtrees carved out into their own document
     "split_dirs": ("derivatives",),
     # subtrees kept as link-only manifests (discoverable, but never inlined)

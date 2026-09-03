@@ -5,6 +5,7 @@ import sys
 import json
 import shutil
 import tempfile
+import re
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -128,3 +129,118 @@ class TestLinkWalker(unittest.TestCase):
     def test_walks_into_lists(self):
         doc = {"a": [{"_DataLink_": "http://h/?hash=sha256:%s" % ("b" * 64)}]}
         self.assertEqual(len(list(_iter_links(doc))), 1)
+
+
+class TestTrimLargestSubtree(unittest.TestCase):
+    """Trimming happens at publish time, once the server has said no.
+
+    A JSON byte count is the wrong thing to budget against, because CouchDB
+    limits the *internal* size of a parsed document and the ratio to JSON
+    depends entirely on content.  Measured against CouchDB 3.4.2 with an 8 MB
+    limit, the largest JSON accepted was 4.19 MB for one big string, 7.23 MB for
+    many short keys, and over 29 MB for a float array -- a sevenfold spread that
+    no client-side estimate would predict.
+    """
+
+    def setUp(self):
+        import shutil as _shutil
+
+        self.root = tempfile.mkdtemp()
+        self.docpath = os.path.join(self.root, "doc.json")
+        from jdata.njcas import CAS
+
+        self.cas = CAS(os.path.join(self.root, "store"), algo="md5", commit_every=1)
+        self._shutil = _shutil
+
+    def tearDown(self):
+        self.cas.close()
+        self._shutil.rmtree(self.root, ignore_errors=True)
+
+    def _write(self, doc):
+        from jdata.njbids import canonical_json
+
+        with open(self.docpath, "w", encoding="utf-8") as fid:
+            fid.write(canonical_json(doc))
+
+    def _read(self):
+        with open(self.docpath, encoding="utf-8") as fid:
+            return json.load(fid)
+
+    def _doc(self):
+        return {
+            ".neurojson": {"Version": "1.0.0", "Fingerprint": "a" * 64},
+            "dataset_description.json": {"Name": "probe"},
+            "README": "keep me",
+            "participants.tsv": {"participant_id": ["sub-01"], "age": [30]},
+            "sub-01": {"anat": {"big.txt": "y" * 4000}},
+            "sub-02": {"anat": {"mid.txt": "y" * 2000}},
+            "sub-03": {"anat": {"small.txt": "y" * 500}},
+        }
+
+    def _trim(self):
+        from jdata.njcli import _trim_largest_subtree
+
+        return _trim_largest_subtree(self.docpath, self.cas, "db", "ds1")
+
+    def test_sheds_the_largest_subtree_first(self):
+        self._write(self._doc())
+        shed = self._trim()
+        self.assertEqual(shed["path"], "sub-01")
+        self.assertLess(shed["now"], shed["was"] + 2000)
+
+    def test_sheds_in_descending_size_order(self):
+        self._write(self._doc())
+        self.assertEqual(self._trim()["path"], "sub-01")
+        self.assertEqual(self._trim()["path"], "sub-02")
+        self.assertEqual(self._trim()["path"], "sub-03")
+        self.assertIsNone(self._trim())
+
+    def test_dataset_metadata_is_never_shed(self):
+        self._write(self._doc())
+        for _ in range(6):
+            if self._trim() is None:
+                break
+        doc = self._read()
+        self.assertEqual(doc["README"], "keep me")
+        self.assertIn("Name", doc["dataset_description.json"])
+        self.assertIn("participant_id", doc["participants.tsv"])
+        self.assertIn("Fingerprint", doc[".neurojson"])
+
+    def test_shed_subtree_is_replaced_by_a_resolvable_link(self):
+        self._write(self._doc())
+        self._trim()
+        node = self._read()["sub-01"]
+        self.assertEqual(list(node), ["_DataLink_"])
+        digest = re.search(r"hash=md5:([0-9a-f]{32})", node["_DataLink_"]).group(1)
+        self.assertTrue(os.path.exists(self.cas.objpath(digest)))
+
+    def test_shed_subtree_content_is_recoverable_in_full(self):
+        original = self._doc()
+        self._write(original)
+        self._trim()
+        node = self._read()["sub-01"]
+        digest = re.search(r"hash=md5:([0-9a-f]{32})", node["_DataLink_"]).group(1)
+        with open(self.cas.objpath(digest), encoding="utf-8") as fid:
+            self.assertEqual(json.load(fid), original["sub-01"])
+
+    def test_document_on_disk_is_rewritten_to_match_what_is_published(self):
+        self._write(self._doc())
+        before = os.path.getsize(self.docpath)
+        self._trim()
+        self.assertLess(os.path.getsize(self.docpath), before)
+
+    def test_already_linked_subtree_is_not_shed_again(self):
+        doc = self._doc()
+        doc["sub-01"] = {"_DataLink_": "http://h/?hash=md5:%s" % ("f" * 32)}
+        self._write(doc)
+        self.assertEqual(self._trim()["path"], "sub-02")
+
+    def test_returns_none_when_only_protected_keys_remain(self):
+        self._write(
+            {
+                ".neurojson": {"Version": "1"},
+                "dataset_description.json": {"Name": "x"},
+                "README": "y",
+            }
+        )
+        self.assertIsNone(self._trim())

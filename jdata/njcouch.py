@@ -54,10 +54,12 @@ class CouchDB:
         timeout=600,
         retries=4,
         verify=True,
+        retry_body_limit=1 << 20,
     ):
         self.url = (url or os.environ.get("NEUROJSON_IO") or "http://localhost:5984").rstrip("/")
         self.timeout = timeout
         self.retries = retries
+        self.retry_body_limit = int(retry_body_limit)
         parsed = urllib.parse.urlsplit(self.url)
         if parsed.username and not user:
             user, password = parsed.username, parsed.password
@@ -128,7 +130,17 @@ class CouchDB:
                 return err.code, parsed
             except (urllib.error.URLError, TimeoutError, OSError) as err:
                 last = (0, {"error": str(err)})
-                if attempt < self.retries:
+                # A large body that gets its connection reset is far more
+                # likely to have been rejected for size than to have hit a
+                # transient fault: CouchDB answers an oversized PUT with a
+                # clean 413, but an oversized POST to an update handler by
+                # closing the socket.  Re-uploading many megabytes four times
+                # to rediscover that is pure waste, so transport failures are
+                # only retried for small requests.
+                retryable = attempt < self.retries and (
+                    data is None or len(data) <= self.retry_body_limit
+                )
+                if retryable:
                     time.sleep(delay)
                     delay *= 2
                     continue
@@ -339,6 +351,19 @@ class CouchDB:
         start = time.time()
         res = self.view(db, view, design=design, limit=1)
         return {"view": view, "seconds": time.time() - start, "total": res.get("total_rows")}
+
+    def alive(self):
+        """True if the server answers a trivial request.
+
+        Used to tell a size rejection apart from a real network fault: an
+        oversized POST to an update handler arrives as a bare connection reset,
+        which on its own is indistinguishable from the server having gone away.
+        """
+        try:
+            status, _body = self.request("GET", "/_up")
+            return status == 200
+        except CouchError:
+            return False
 
     def changes(self, db, since="0", limit=None):
         params = {"since": since}

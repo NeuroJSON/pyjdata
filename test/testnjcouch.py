@@ -425,3 +425,66 @@ class TestPutDocIsSeparateFromPush(unittest.TestCase):
     def test_dataset_push_still_never_uses_put(self):
         self.couch.push("openneuro_full", "ds000001", {"a": 1})
         self.assertEqual([c["method"] for c in self.rec.calls], ["POST"])
+
+
+class TestOversizedBodyHandling(unittest.TestCase):
+    """An oversized document is reported two different ways by CouchDB.
+
+    A PUT gets a clean ``413 document_too_large``.  A POST to an update handler
+    gets its connection closed instead, which on its own is indistinguishable
+    from the server having gone away -- so the publish path checks whether the
+    server is still answering before deciding.  Re-uploading many megabytes
+    several times to rediscover a rejection is also pure waste, so transport
+    failures are only retried for small requests.
+    """
+
+    def setUp(self):
+        self._orig = urllib.request.urlopen
+
+    def tearDown(self):
+        urllib.request.urlopen = self._orig
+
+    def test_large_body_transport_failure_is_not_retried(self):
+        attempts = []
+
+        def reset(req, timeout=None, context=None):
+            attempts.append(len(req.data or b""))
+            raise ConnectionResetError(104, "Connection reset by peer")
+
+        urllib.request.urlopen = reset
+        couch = CouchDB("http://h:5984", retries=4, retry_body_limit=1 << 20)
+        with self.assertRaises(CouchError):
+            couch.request("POST", "/db/_design/qq/_update/timestamp/d", raw=b"x" * (4 << 20))
+        self.assertEqual(len(attempts), 1)
+
+    def test_small_body_transport_failure_is_retried(self):
+        attempts = []
+
+        def reset(req, timeout=None, context=None):
+            attempts.append(1)
+            raise ConnectionResetError(104, "Connection reset by peer")
+
+        urllib.request.urlopen = reset
+        import jdata.njcouch as mod
+
+        orig_sleep = mod.time.sleep
+        mod.time.sleep = lambda _s: None
+        try:
+            couch = CouchDB("http://h:5984", retries=2, retry_body_limit=1 << 20)
+            with self.assertRaises(CouchError):
+                couch.request("POST", "/db/d", raw=b"tiny")
+        finally:
+            mod.time.sleep = orig_sleep
+        self.assertEqual(len(attempts), 3)
+
+    def test_alive_reports_true_when_the_server_answers(self):
+        rec = _Recorder({("GET", "http://h:5984/_up"): (200, {"status": "ok"})})
+        urllib.request.urlopen = rec
+        self.assertTrue(CouchDB("http://h:5984", retries=0).alive())
+
+    def test_alive_reports_false_when_it_does_not(self):
+        def dead(req, timeout=None, context=None):
+            raise ConnectionResetError(104, "gone")
+
+        urllib.request.urlopen = dead
+        self.assertFalse(CouchDB("http://h:5984", retries=0).alive())
