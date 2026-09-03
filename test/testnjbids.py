@@ -29,6 +29,7 @@ import numpy as np
 from jdata.njcas import CAS
 from jdata.njbids import (
     bids2json,
+    strip_trailing_commas,
     canonical_json,
     dataset_version,
     fingerprint,
@@ -529,6 +530,21 @@ class TestMalformedInputs(unittest.TestCase):
         self.assertEqual(table["trial_type"], ["go", "stop"])
         self.assertNotIn("\x00", canonical_json(result["doc"]))
 
+    def test_trailing_comma_sidecar_is_repaired_not_stringified(self):
+        """Trailing commas are a common hand-editing artefact in BIDS sidecars."""
+        target = os.path.join(self.ds, "sub-01", "anat", "sub-01_T1w.json")
+        with open(target, "w") as fid:
+            fid.write(
+                '{\n "SamplingFrequency": 200.0,\n "Columns": [\n  "time",\n  "eeg",\n ]\n}\n'
+            )
+        result = self._convert()
+        node = result["doc"]["sub-01"]["anat"]["sub-01_T1w.json"]
+        self.assertIsInstance(node, dict)
+        self.assertEqual(node["SamplingFrequency"], 200.0)
+        self.assertEqual(node["Columns"], ["time", "eeg"])
+        self.assertEqual(len(result["errors"]), 1)
+        self.assertIn("repaired invalid JSON", result["errors"][0])
+
     def test_whitespace_only_json_is_treated_as_empty(self):
         """Several OpenNeuro datasets ship one-byte "\\n" sidecar placeholders."""
         target = os.path.join(self.ds, "sub-01", "anat", "sub-01_T1w.json")
@@ -733,3 +749,36 @@ class TestFileLevelParallelism(unittest.TestCase):
             self.assertEqual(_prehash([(link, "gone.bin")], cas, 2), 0)
         finally:
             cas.close()
+
+
+class TestTrailingCommaRepair(unittest.TestCase):
+    """The repair must be string-aware, or it silently corrupts data."""
+
+    def test_removes_trailing_comma_before_bracket_and_brace(self):
+        self.assertEqual(strip_trailing_commas("[1,2,]"), "[1,2]")
+        self.assertEqual(strip_trailing_commas('{"a":1,}'), '{"a":1}')
+
+    def test_handles_whitespace_and_newlines_before_the_closer(self):
+        self.assertEqual(strip_trailing_commas("[1,\n  2,\n]"), "[1,\n  2\n]")
+
+    def test_nested_containers(self):
+        text = '{"a": [1, 2,], "b": {"c": 3,},}'
+        self.assertEqual(json.loads(strip_trailing_commas(text)), {"a": [1, 2], "b": {"c": 3}})
+
+    def test_comma_inside_a_string_is_preserved(self):
+        for text in ('{"a": "x,]"}', '{"a": "y,}"}', '["p,]","q,}"]'):
+            self.assertEqual(json.loads(strip_trailing_commas(text)), json.loads(text))
+
+    def test_escaped_quote_does_not_break_string_tracking(self):
+        text = '{"a": "he said \\"hi,]\\"", "b": [1,]}'
+        self.assertEqual(
+            json.loads(strip_trailing_commas(text)),
+            json.loads('{"a": "he said \\"hi,]\\"", "b": [1]}'),
+        )
+
+    def test_valid_json_is_returned_unchanged(self):
+        for text in ('{"a":[1,2]}', "[]", "{}", '{"a": {"b": [1, 2, 3]}}'):
+            self.assertEqual(strip_trailing_commas(text), text)
+
+    def test_legitimate_commas_between_items_are_kept(self):
+        self.assertEqual(strip_trailing_commas("[1, 2, 3]"), "[1, 2, 3]")

@@ -42,6 +42,7 @@ from .njcas import CAS, annex_key, annex_key_info, cas_url
 
 __all__ = [
     "bids2json",
+    "strip_trailing_commas",
     "dataset_version",
     "canonical_json",
     "fingerprint",
@@ -169,6 +170,61 @@ def canonical_json(doc):
 
 
 _HASH_IN_URL = re.compile(r"hash=(sha256|sha1|md5):([0-9a-f]+)")
+
+
+def strip_trailing_commas(text):
+    """Remove commas that directly precede a closing brace or bracket.
+
+    Trailing commas are invalid JSON but a common hand-editing artefact in BIDS
+    sidecars, and rejecting the file costs every field in it.  The scan is
+    string-aware: a comma inside a string literal is left alone, so a value
+    like ``"a,]"`` cannot be silently corrupted.
+    """
+    out = []
+    in_string = False
+    escaped = False
+    pending = []  # indices in `out` of commas that may yet turn out to be trailing
+    for char in text:
+        if in_string:
+            out.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+            pending = []
+            out.append(char)
+            continue
+        if char == ",":
+            pending = [len(out)]
+            out.append(char)
+            continue
+        if char in " \t\r\n":
+            out.append(char)
+            continue
+        if char in "}]" and pending:
+            out[pending[0]] = ""
+        pending = []
+        out.append(char)
+    return "".join(out)
+
+
+def _loads_tolerant(text):
+    """Parse JSON, repairing trailing commas.  Returns ``(data, repair)``."""
+    try:
+        return json.loads(text), None
+    except ValueError:
+        repaired = strip_trailing_commas(text)
+        if repaired != text:
+            try:
+                return json.loads(repaired), "trailing comma"
+            except ValueError:
+                pass
+        raise
 
 
 def _dehydrate(node):
@@ -474,12 +530,16 @@ class _Converter:
             self._count("json-empty")
             return {}
         try:
-            data = json.loads(text)
+            data, repair = _loads_tolerant(text)
         except ValueError as err:
             self.errors.append("%s: invalid JSON kept as text: %s" % (relpath, err))
             self._count("json-malformed")
             return text
-        self._count("json")
+        if repair:
+            self.errors.append("%s: repaired invalid JSON (%s)" % (relpath, repair))
+            self._count("json-repaired")
+        else:
+            self._count("json")
         return data
 
     def _tabular(self, path, relpath, fname, size):
