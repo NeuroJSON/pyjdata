@@ -253,3 +253,98 @@ class TestUpdateHandler(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+PGSYNC_ENV = "NEUROJSON_PGSYNC"  # path to backend/sync/incrementalSync.js
+PGCOMPAT = os.path.join(ROOT, "neurojson", "pgcompat.js")
+
+
+def _pgsync_path():
+    """Locate the Postgres sync source, if the backend checkout is available."""
+    explicit = os.environ.get(PGSYNC_ENV)
+    if explicit and os.path.isfile(explicit):
+        return explicit
+    return None
+
+
+def run_pg(transform, docpath, syncfile):
+    out = subprocess.run(
+        ["node", PGCOMPAT, syncfile, transform, docpath],
+        capture_output=True,
+        text=True,
+    )
+    if out.returncode != 0:
+        raise AssertionError("pgcompat.js failed: %s" % out.stderr[:2000])
+    return [json.loads(line) for line in out.stdout.splitlines() if line.strip()]
+
+
+@unittest.skipUnless(have_node(), "node is required")
+@unittest.skipUnless(_pgsync_path(), "set %s to backend/sync/incrementalSync.js" % PGSYNC_ENV)
+class TestPostgresSyncCompatibility(unittest.TestCase):
+    """The Postgres search layer keeps its own ports of the CouchDB views.
+
+    ``backend/sync/incrementalSync.js`` reimplements the dbinfo and subjects map
+    functions in Node so that an incremental sync needs two HTTP requests
+    instead of three, and its own comment notes that those copies "drift
+    silently" from the originals.  A document schema change can therefore keep
+    CouchDB perfectly happy while quietly emptying out Postgres search results,
+    so the two implementations are compared directly here.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.sync = _pgsync_path()
+        cls.root = tempfile.mkdtemp()
+        ds = make_bids(os.path.join(cls.root, "dsP"), subjects=("01", "02", "03", "04"), git=True)
+        cas = CAS(os.path.join(cls.root, "cas"), commit_every=1)
+        cls.result = bids2json(ds, dbname="testdb", dsname="dsP", cas=cas)
+        cas.close()
+        cls.docdir = os.path.join(cls.root, "out", "dsP", "2.3.1")
+        os.makedirs(cls.docdir)
+        cls.docpath = os.path.join(cls.docdir, "doc.json")
+        with open(cls.docpath, "w", encoding="utf-8") as fid:
+            fid.write(canonical_json(cls.result["doc"]))
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.root, ignore_errors=True)
+
+    def test_subjects_rows_match_the_couchdb_view_exactly(self):
+        pg = run_pg("subjects", self.docpath, self.sync)
+        view = run_view("subjects", self.docpath)
+        self.assertEqual(len(pg), len(view))
+        self.assertEqual(
+            {tuple(r["key"]): r["value"] for r in pg},
+            {tuple(r["key"]): r["value"] for r in view},
+        )
+
+    def test_subjects_key_is_sliceable_the_way_the_sync_slices_it(self):
+        # firstSync() reads row.key[6] as the ioviews.subj column
+        for row in run_pg("subjects", self.docpath, self.sync):
+            self.assertTrue(row["subj"])
+            self.assertEqual(row["view"], "subjects")
+
+    def test_dbinfo_is_produced_and_names_the_dataset(self):
+        rows = run_pg("dbinfo", self.docpath, self.sync)
+        self.assertEqual(len(rows), 1)
+        value = rows[0]["value"]
+        self.assertEqual(value["name"], "Synthetic Test Dataset")
+        self.assertEqual(rows[0]["subj"], "4")
+        self.assertGreater(value["length"], 0)
+
+    def test_document_is_valid_postgres_jsonb(self):
+        """jsonb rejects \\u0000, and the sync only strips it from its own output."""
+        with open(self.docpath, encoding="utf-8") as fid:
+            text = fid.read()
+        self.assertNotIn("\\u0000", text)
+        self.assertNotIn("\x00", text)
+
+    def test_ioviews_key_columns_are_present_for_every_row(self):
+        """ioviews has UNIQUE(dbname, dsname, subj, view); none may be null."""
+        rows = run_pg("subjects", self.docpath, self.sync) + run_pg(
+            "dbinfo", self.docpath, self.sync
+        )
+        for row in rows:
+            self.assertTrue(row["id"])
+            self.assertTrue(row["view"])
+            self.assertIsNotNone(row["subj"])

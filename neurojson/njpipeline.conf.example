@@ -1,0 +1,32 @@
+# Copy to njpipeline.conf and edit.  Sourced by njpipeline.sh.
+
+# Where the datalad mirror lives, and where per-version digests are written.
+NJ_ROOT=/lake/neurojson/prep/openneuro_full
+
+# Content-addressed store.  Must be on the same filesystem as the mirror for
+# objects to be hardlinks rather than copies.
+NJ_CAS=/lake/neurojson/cas
+
+# Target database, and the database that receives split-out derivatives.
+NJ_DB=openneuro_full
+NJ_SPLIT_DB=openneuro_derivative
+
+# CouchDB to publish to.  Leave unset to convert without publishing.
+# Point this at the development/backup instance, not production.
+NJ_SERVER=http://zodiac:5555
+
+# ~/.netrc machine holding the credentials for NJ_SERVER.  Defaults to the
+# hostname of NJ_SERVER.  Keep ~/.netrc at mode 600.
+#NJ_NETRC=zodiac
+
+# Conversion workers.  The mirror sits on a single 8-disk raidz1 vdev, which
+# saturates at roughly 350-480 MB/s of concurrent reads; going much above this
+# only adds seek contention.
+NJ_THREADS=24
+
+# Only needed when jdata is not installed into the interpreter.
+NJ_PYTHONPATH=/home/users/fangq/space/git/Project/github/pyjdata
+
+# Checkout of the NeuroJSON_io backend (a branch that carries backend/), to run
+# the Postgres search sync as the last stage.
+#NJ_PGSYNC_DIR=/home/users/fangq/space/git/Temp/NeuroJSON_io/backend

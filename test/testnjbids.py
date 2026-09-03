@@ -445,3 +445,73 @@ class TestFingerprintFunction(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestMalformedInputs(unittest.TestCase):
+    """Real corpora contain files that do not quite match their extension."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.ds = make_bids(os.path.join(self.root, "dsM"), git=True, derivatives=False)
+        self.cas = CAS(os.path.join(self.root, "cas"), commit_every=1)
+
+    def tearDown(self):
+        self.cas.close()
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def _convert(self):
+        return bids2json(self.ds, dbname="db", dsname="dsM", cas=self.cas)
+
+    def test_json_sidecar_with_a_utf8_bom_is_parsed(self):
+        target = os.path.join(self.ds, "sub-01", "anat", "sub-01_T1w.json")
+        with open(target, "wb") as fid:
+            fid.write(b'\xef\xbb\xbf{\r\n "EchoTime": 0.005\r\n}\r\n')
+        result = self._convert()
+        self.assertEqual(result["errors"], [])
+        self.assertEqual(result["doc"]["sub-01"]["anat"]["sub-01_T1w.json"]["EchoTime"], 0.005)
+
+    def test_invalid_json_is_kept_as_text_not_dropped(self):
+        target = os.path.join(self.ds, "sub-01", "anat", "sub-01_T1w.json")
+        with open(target, "w") as fid:
+            fid.write('# a comment line\n{"EchoTime": 1}\n')
+        result = self._convert()
+        node = result["doc"]["sub-01"]["anat"]["sub-01_T1w.json"]
+        self.assertIsInstance(node, str)
+        self.assertIn("EchoTime", node)
+        self.assertEqual(len(result["errors"]), 1)
+        self.assertIn("invalid JSON kept as text", result["errors"][0])
+
+    def test_tsv_with_latin1_units_column_is_parsed(self):
+        target = os.path.join(self.ds, "sub-01", "func", "sub-01_task-rest_channels.tsv")
+        with open(target, "wb") as fid:
+            fid.write(b"name\tunits\nCh1\t\xb5V\nCh2\t\xb5V\n")
+        result = self._convert()
+        self.assertEqual(result["errors"], [])
+        table = result["doc"]["sub-01"]["func"]["sub-01_task-rest_channels.tsv"]
+        self.assertEqual(table["units"], ["µV", "µV"])
+
+    def test_zero_byte_file_becomes_an_empty_object(self):
+        target = os.path.join(self.ds, "sub-01", "anat", "empty.json")
+        open(target, "w").close()
+        result = self._convert()
+        self.assertEqual(result["doc"]["sub-01"]["anat"]["empty.json"], {})
+
+    def test_unparseable_nifti_falls_back_to_a_link(self):
+        target = os.path.join(self.ds, "sub-01", "anat", "sub-01_T1w.nii.gz")
+        with open(target, "wb") as fid:
+            fid.write(b"not a nifti at all")
+        result = self._convert()
+        node = result["doc"]["sub-01"]["anat"]["sub-01_T1w.nii.gz"]
+        self.assertEqual(list(node), ["_DataLink_"])
+        self.assertTrue(any("nifti header" in e for e in result["errors"]))
+
+    def test_a_single_bad_file_does_not_abort_the_dataset(self):
+        with open(os.path.join(self.ds, "sub-01", "anat", "sub-01_T1w.nii.gz"), "wb") as fid:
+            fid.write(b"garbage")
+        with open(os.path.join(self.ds, "sub-02", "anat", "sub-02_T1w.json"), "w") as fid:
+            fid.write("{not json")
+        result = self._convert()
+        # sub-02's other files still converted, and the document is complete
+        self.assertIn("sub-02_T1w.nii.gz", result["doc"]["sub-02"]["anat"])
+        self.assertIn("participant_id", result["doc"]["participants.tsv"])
+        self.assertEqual(len(result["errors"]), 2)

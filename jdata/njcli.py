@@ -22,6 +22,7 @@ import json
 import time
 import argparse
 import traceback
+import urllib.parse
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from .njcas import CAS
@@ -260,13 +261,9 @@ def _iter_published(outputroot, names=None):
 def cmd_push(args):
     from .njcouch import CouchDB, CouchError
 
-    couch = CouchDB(args.server, netrc_machine=args.netrc)
-    if args.server and "neurojson.io" in args.server and not args.allow_production:
-        print(
-            "refusing to target neurojson.io without --allow-production",
-            file=sys.stderr,
-        )
+    if not _guard_production(args.server, args.allow_production):
         return 1
+    couch = CouchDB(args.server, netrc_machine=args.netrc)
 
     items = list(_iter_published(args.output, args.ds))
     print("pushing %d document(s) to %s/%s" % (len(items), couch.url, args.db))
@@ -289,9 +286,125 @@ def cmd_push(args):
     return 1 if failed else 0
 
 
+PRODUCTION_HOSTS = ("neurojson.io", "neurojson.org")
+
+
+def _guard_production(server, allowed):
+    """Refuse to write to the production host unless explicitly permitted.
+
+    The admin credential for production is routinely present in the operator's
+    environment, so an accidentally copied URL is a realistic way to write to
+    the live database.  A publish is not trivially reversible, so the default
+    has to be refusal.
+    """
+    host = urllib.parse.urlsplit(server or "").hostname or ""
+    if any(host == h or host.endswith("." + h) for h in PRODUCTION_HOSTS) and not allowed:
+        print(
+            "refusing to write to production host %r without --allow-production" % host,
+            file=sys.stderr,
+        )
+        return False
+    return True
+
+
+def cmd_deploy(args):
+    """Create the databases, install the design document and register them."""
+    from .njcouch import CouchDB, CouchError, design_from_dir
+
+    if not _guard_production(args.server, args.allow_production):
+        return 1
+    couch = CouchDB(args.server, netrc_machine=args.netrc)
+
+    session = couch.session().get("userCtx", {})
+    print("server %s as %s (roles=%s)" % (couch.url, session.get("name"), session.get("roles")))
+    if not couch.is_server_admin():
+        print(
+            "\nERROR: this account is not a CouchDB server admin, so it cannot\n"
+            "create databases. Re-run with a server-admin credential:\n"
+            "  python3 -m jdata.njcli deploy --server URL --netrc <machine> ...\n"
+            "where ~/.netrc has an entry for <machine> with the admin login.",
+            file=sys.stderr,
+        )
+        return 2
+
+    databases = [args.db] + ([args.split_db] if args.split_db else [])
+    for db in databases:
+        if couch.db_exists(db):
+            info = couch.db_info(db)
+            print("  %-24s exists (%d docs)" % (db, info["doc_count"]))
+        else:
+            couch.create_db(db)
+            print("  %-24s created" % db)
+        if args.admin:
+            couch.set_security(db, admins=args.admin, members=args.member or [])
+            print("  %-24s security: admins=%s" % (db, args.admin))
+
+    ddoc = design_from_dir(args.design)
+    for db in databases:
+        couch.put_design(db, ddoc, name=args.name)
+        print(
+            "  %-24s _design/%s installed (views=%s)"
+            % (db, args.name, sorted(ddoc.get("views", {})))
+        )
+
+    if args.register:
+        _register(couch, args, databases)
+
+    if args.warm:
+        for db in databases:
+            for view in sorted(ddoc.get("views", {})):
+                info = couch.warm_view(db, view, design=args.name)
+                print(
+                    "  %-24s %-18s %7.1fs rows=%s"
+                    % (db, info["view"], info["seconds"], info["total"])
+                )
+    return 0
+
+
+def _register(couch, args, databases):
+    """Add the databases to the sys/registry document.
+
+    The Postgres sync discovers which databases to index by reading
+    sys/registry, so a database that is absent from it is simply never
+    searchable no matter how many documents it holds.
+    """
+    from .njcouch import CouchError
+
+    try:
+        registry = couch.get_doc("sys", "registry")
+    except CouchError as err:
+        print("  registry unavailable (%s); skipping registration" % err.status)
+        return
+    entries = registry.get("database", [])
+    known = {entry.get("id") for entry in entries}
+    added = []
+    for db in databases:
+        if db in known:
+            continue
+        entries.append(
+            {
+                "id": db,
+                "name": args.register_name or db,
+                "fullname": args.register_name or db,
+                "url": args.register_url or "",
+                "group": 1,
+                "datatype": list(args.register_datatype or []),
+            }
+        )
+        added.append(db)
+    if not added:
+        print("  registry already lists %s" % ", ".join(databases))
+        return
+    registry["database"] = entries
+    couch.push("sys", "registry", registry, design=args.design_name)
+    print("  registry updated: added %s" % ", ".join(added))
+
+
 def cmd_views(args):
     from .njcouch import CouchDB, design_from_dir
 
+    if not _guard_production(args.server, getattr(args, "allow_production", False)):
+        return 1
     couch = CouchDB(args.server, netrc_machine=args.netrc)
     ddoc = design_from_dir(args.design)
     print(
@@ -408,6 +521,24 @@ def build_parser():
     push.add_argument("--verbose", action="store_true")
     push.set_defaults(func=cmd_push)
 
+    dep = sub.add_parser("deploy", help="create databases and install the design document")
+    dep.add_argument("--server", required=True)
+    dep.add_argument("--db", required=True)
+    dep.add_argument("--split-db", help="database for split-out subtrees, e.g. derivatives")
+    dep.add_argument("--design", required=True, help="directory of view_*.js files")
+    dep.add_argument("--name", default="qq", help="design document name")
+    dep.add_argument("--design-name", default="qq", help="design doc used for registry writes")
+    dep.add_argument("--netrc", default="neurojson.io")
+    dep.add_argument("--admin", nargs="*", help="usernames to set as database admins")
+    dep.add_argument("--member", nargs="*", help="usernames to set as database members")
+    dep.add_argument("--register", action="store_true", help="add to sys/registry")
+    dep.add_argument("--register-name")
+    dep.add_argument("--register-url")
+    dep.add_argument("--register-datatype", nargs="*")
+    dep.add_argument("--warm", action="store_true")
+    dep.add_argument("--allow-production", action="store_true")
+    dep.set_defaults(func=cmd_deploy)
+
     views = sub.add_parser("views", help="install a design document from a directory")
     views.add_argument("--db", required=True)
     views.add_argument("--design", required=True, help="directory of view_*.js files")
@@ -415,6 +546,7 @@ def build_parser():
     views.add_argument("--name", default="qq")
     views.add_argument("--netrc", default="neurojson.io")
     views.add_argument("--warm", action="store_true", help="build each view after install")
+    views.add_argument("--allow-production", action="store_true")
     views.set_defaults(func=cmd_views)
 
     cas = sub.add_parser("cas", help="inspect or verify the content store")

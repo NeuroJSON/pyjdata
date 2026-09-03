@@ -451,12 +451,27 @@ class _Converter:
         return text
 
     def _jsonfile(self, path, relpath, size):
+        """Parse a JSON sidecar, tolerating the two defects seen in practice.
+
+        A byte-order mark makes ``json.load`` raise, so the file is decoded as
+        utf-8-sig, which strips a BOM if present and is otherwise identical to
+        utf-8.  A sidecar that is not valid JSON at all is kept verbatim as a
+        string rather than reduced to a link: the content is still human
+        readable and still searchable, which is the whole point of the digest,
+        and the parse failure is recorded either way.
+        """
         if size > self.config["max_json"]:
             self._count("json-linked")
             return self._link(self._register(path, relpath, "json"))
-        with open(path, "r", encoding="utf-8", errors="replace") as fid:
-            data = json.load(fid)
+        with open(path, "r", encoding="utf-8-sig", errors="replace") as fid:
+            text = fid.read()
         self._register(path, relpath, "json", store=False)
+        try:
+            data = json.loads(text)
+        except ValueError as err:
+            self.errors.append("%s: invalid JSON kept as text: %s" % (relpath, err))
+            self._count("json-malformed")
+            return text
         self._count("json")
         return data
 
@@ -598,7 +613,7 @@ def _walk(root, skip_hidden=True):
 def _load_description(dspath):
     path = os.path.join(dspath, "dataset_description.json")
     try:
-        with open(path, "r", encoding="utf-8", errors="replace") as fid:
+        with open(path, "r", encoding="utf-8-sig", errors="replace") as fid:
             return json.load(fid)
     except Exception:
         return {}
