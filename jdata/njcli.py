@@ -308,17 +308,18 @@ def _iter_published(outputroot, names=None, split_names=None):
         yield dsname, version, docpath, splits
 
 
-def _trim_largest_subtree(docpath, cas, db, ds, cas_url_base=None):
-    """Shed the largest top-level subtree of a document into the store.
+def _trim_to(docpath, cas, db, ds, target, limit=None, cas_url_base=None):
+    """Shed largest-first until the document is at most ``target`` bytes.
 
-    Returns a description of what was shed, or None if nothing remains that may
-    be shed.  The document on disk is rewritten, so the immutable archive keeps
-    matching what was actually published.
+    Returns the list of shed subtrees.  Shedding one subtree per round trip is
+    correct but slow to converge: a document of 89 MB against an 8 MB limit
+    needs about twenty rejected uploads to get there, each re-sending most of
+    the document.  Given a size the server has already refused, shedding down to
+    a fraction of it converges in a handful of attempts instead.
 
-    Never sheds the dataset-level metadata that makes a document findable --
-    description, participants table, README, the metadata block -- and always
-    takes the largest remaining subtree, so the result is a function of the
-    document rather than of how many attempts it took to get there.
+    All the shedding for one round happens in memory and the document is written
+    once, because re-reading and re-serialising an 89 MB document per subtree is
+    itself slower than the upload it is trying to avoid.
     """
     from .njbids import BUDGET_PROTECTED, canonical_json
     from .njcas import cas_url
@@ -326,6 +327,7 @@ def _trim_largest_subtree(docpath, cas, db, ds, cas_url_base=None):
     with open(docpath, "r", encoding="utf-8") as fid:
         doc = json.load(fid)
 
+    # size every candidate once, then shed in descending order
     candidates = []
     for key, value in doc.items():
         if key in BUDGET_PROTECTED or not isinstance(value, dict):
@@ -333,25 +335,41 @@ def _trim_largest_subtree(docpath, cas, db, ds, cas_url_base=None):
         if "_DataLink_" in value:
             continue
         candidates.append((len(canonical_json(value)), key))
-    if not candidates:
-        return None
     candidates.sort(key=lambda item: (-item[0], item[1]))
-    was, key = candidates[0]
 
-    digest, size = cas.put_bytes(canonical_json(doc[key]))
-    doc[key] = {
-        "_DataLink_": cas_url(
-            digest,
-            size=size,
-            db=db,
-            doc=ds,
-            file="%s.json" % key,
-            base=cas_url_base,
-            algo=cas.algo,
-        )
-    }
-    _write_atomic(docpath, canonical_json(doc))
-    return {"path": key, "was": was, "now": len(canonical_json(doc))}
+    total = len(canonical_json(doc))
+    shed = []
+    for was, key in candidates:
+        if total <= target or (limit is not None and len(shed) >= limit):
+            break
+        digest, size = cas.put_bytes(canonical_json(doc[key]))
+        link = {
+            "_DataLink_": cas_url(
+                digest,
+                size=size,
+                db=db,
+                doc=ds,
+                file="%s.json" % key,
+                base=cas_url_base,
+                algo=cas.algo,
+            )
+        }
+        doc[key] = link
+        total -= was - len(canonical_json(link))
+        shed.append({"path": key, "was": was})
+
+    if shed:
+        text = canonical_json(doc)
+        _write_atomic(docpath, text)
+        for item in shed:
+            item["now"] = len(text)
+    return shed
+
+
+def _trim_largest_subtree(docpath, cas, db, ds, cas_url_base=None):
+    """Shed exactly the largest top-level subtree, or return None if none can be."""
+    shed = _trim_to(docpath, cas, db, ds, target=-1, limit=1, cas_url_base=cas_url_base)
+    return shed[0] if shed else None
 
 
 def cmd_push(args):
@@ -369,14 +387,35 @@ def cmd_push(args):
 
     if not _guard_production(args.server, args.allow_production):
         return 1
-    couch = CouchDB(args.server, netrc_machine=args.netrc)
+    couch = CouchDB(args.server, netrc_machine=args.netrc, timeout=args.timeout, retries=1)
     cas = CAS(args.cas, algo=args.algo) if args.cas else None
 
     items = list(_iter_published(args.output, args.ds))
     print("pushing %d document(s) to %s/%s" % (len(items), couch.url, args.db))
     ok = failed = trimmed = 0
+    # The smallest size this server has actually refused, learned during the run.
+    # The first oversized document pays the discovery cost; later ones are
+    # trimmed before the attempt rather than after, which matters because an
+    # 89 MB upload takes minutes just to be refused.  Still empirical: the bound
+    # comes from the server, not from a guess about its internals.
+    refused_at = None
     for dsname, version, docpath, splits in items:
         notes = []
+        if cas is not None and refused_at is not None and os.path.getsize(docpath) >= refused_at:
+            shed = _trim_to(
+                docpath,
+                cas,
+                args.db,
+                dsname,
+                int(refused_at * args.trim_factor),
+                cas_url_base=args.cas_url,
+            )
+            if shed:
+                trimmed += len(shed)
+                notes.append(
+                    "pre-trimmed %d subtree(s) to %.0fkB"
+                    % (len(shed), os.path.getsize(docpath) / 1024.0)
+                )
         published = False
         for attempt in range(args.max_trim + 1):
             try:
@@ -400,14 +439,24 @@ def cmd_push(args):
                 if attempt >= args.max_trim:
                     print("  %-12s still too large after %d trims" % (dsname, args.max_trim))
                     break
-                shed = _trim_largest_subtree(
-                    docpath, cas, args.db, dsname, cas_url_base=args.cas_url
+                refused = os.path.getsize(docpath)
+                refused_at = refused if refused_at is None else min(refused_at, refused)
+                shed = _trim_to(
+                    docpath,
+                    cas,
+                    args.db,
+                    dsname,
+                    int(refused * args.trim_factor),
+                    cas_url_base=args.cas_url,
                 )
-                if shed is None:
+                if not shed:
                     print("  %-12s too large, nothing left to trim" % dsname)
                     break
-                trimmed += 1
-                notes.append("%s %.0fkB" % (shed["path"], shed["was"] / 1024.0))
+                trimmed += len(shed)
+                notes.append(
+                    "%d subtree(s) %.0fkB -> %.0fkB"
+                    % (len(shed), refused / 1024.0, os.path.getsize(docpath) / 1024.0)
+                )
 
         if not published:
             failed += 1
@@ -895,7 +944,12 @@ def build_parser():
     push = sub.add_parser("push", help="publish digests through the update handler")
     push.add_argument("--output", required=True)
     push.add_argument("--db", required=True)
-    push.add_argument("--split-db", help="database for split-out subtrees")
+    push.add_argument(
+        "--split-db",
+        help="database receiving split-out subtrees such as derivatives. "
+        "Defaults to <db>_derivative, which is only right if the databases were "
+        "named that way -- pass it explicitly otherwise",
+    )
     push.add_argument("--server", required=True)
     push.add_argument("--design", default="qq")
     push.add_argument("--netrc", default="neurojson.io", help="netrc machine for credentials")
@@ -906,9 +960,24 @@ def build_parser():
     push.add_argument(
         "--max-trim",
         type=int,
-        default=8,
-        help="how many times to shed the largest subtree and retry when the "
-        "server rejects a document as too large",
+        default=12,
+        help="how many rounds of trim-and-retry to allow when the server "
+        "rejects a document as too large",
+    )
+    push.add_argument(
+        "--trim-factor",
+        type=float,
+        default=0.5,
+        help="each round sheds largest-first until the document is at most this "
+        "fraction of the size just refused (default 0.5, so it converges in a "
+        "few rounds rather than one subtree per round trip)",
+    )
+    push.add_argument(
+        "--timeout",
+        type=int,
+        default=300,
+        help="per-request timeout; a document the server will refuse can "
+        "otherwise sit in a blocked upload for a long time",
     )
     push.add_argument("--allow-production", action="store_true")
     push.add_argument("--verbose", action="store_true")
