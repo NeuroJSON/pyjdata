@@ -29,6 +29,7 @@ import numpy as np
 
 from jdata.njcas import CAS
 from jdata.njbids import (
+    FileInfo,
     bids2json,
     strip_trailing_commas,
     canonical_json,
@@ -37,6 +38,15 @@ from jdata.njbids import (
     fileext,
     _dehydrate,
 )
+
+
+def _walk_one(path, relpath):
+    """Build the FileInfo the directory walk would have produced for one path."""
+    is_link = os.path.islink(path)
+    target = os.readlink(path) if is_link else None
+    present = os.path.exists(path)
+    size = os.path.getsize(path) if present else 0
+    return FileInfo(path, relpath, is_link, present, size, target)
 
 
 def _write(path, text):
@@ -731,7 +741,7 @@ class TestFileLevelParallelism(unittest.TestCase):
                 link = os.path.join(self.root, "annexlike", "f%d.bin" % i)
                 if not os.path.lexists(link):
                     os.symlink(os.path.relpath(target, os.path.dirname(link)), link)
-                files.append((link, "f%d.bin" % i))
+                files.append(_walk_one(link, "f%d.bin" % i))
             self.assertEqual(_prehash(files, cas, 4), 6)
             self.assertEqual(cas.memo_count(), 6)
         finally:
@@ -747,7 +757,7 @@ class TestFileLevelParallelism(unittest.TestCase):
                 "../.git/annex/objects/aa/bb/MD5E-s9--%032d.bin/MD5E-s9--%032d.bin" % (0, 0),
                 link,
             )
-            self.assertEqual(_prehash([(link, "gone.bin")], cas, 2), 0)
+            self.assertEqual(_prehash([_walk_one(link, "gone.bin")], cas, 2), 0)
         finally:
             cas.close()
 

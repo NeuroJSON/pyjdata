@@ -38,6 +38,7 @@ import urllib.parse
 __all__ = [
     "CAS",
     "annex_key",
+    "annex_key_from_target",
     "annex_key_info",
     "cas_url",
     "DEFAULT_CAS_URL",
@@ -58,6 +59,18 @@ _READ_CHUNK = 4 << 20  # 4 MiB: large enough that ZFS readahead stays useful
 _HEX_LENGTHS = {"md5": 32, "sha1": 40, "sha256": 64, "sha512": 128}
 
 
+def annex_key_from_target(target):
+    """Return the git-annex key from a symlink target string, or None.
+
+    Split out from :func:`annex_key` so a caller that has already read the link
+    -- the directory walk does -- need not read it again.
+    """
+    if not target:
+        return None
+    match = _ANNEX_RE.search(target.replace(os.sep, "/"))
+    return match.group("key") if match else None
+
+
 def annex_key(path):
     """Return the git-annex key a symlink points at, or None.
 
@@ -66,9 +79,7 @@ def annex_key(path):
     """
     if not os.path.islink(path):
         return None
-    target = os.readlink(path)
-    match = _ANNEX_RE.search(target.replace(os.sep, "/"))
-    return match.group("key") if match else None
+    return annex_key_from_target(os.readlink(path))
 
 
 def annex_key_info(key):

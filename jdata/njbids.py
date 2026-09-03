@@ -38,7 +38,7 @@ import warnings
 
 import numpy as np
 
-from .njcas import CAS, annex_key, annex_key_info, cas_url
+from .njcas import CAS, annex_key, annex_key_from_target, annex_key_info, cas_url
 
 __all__ = [
     "bids2json",
@@ -361,6 +361,7 @@ class _Converter:
         self.manifest = []
         self.manifest_index = {}
         self.errors = []
+        self._info = None
         # doc-key path -> (source relpath, serialised length); candidates for
         # the size-budget offload pass
         self.inline = []
@@ -371,7 +372,7 @@ class _Converter:
     def _count(self, kind):
         self.counts[kind] = self.counts.get(kind, 0) + 1
 
-    def _register(self, path, relpath, kind, store=True):
+    def _register(self, path, relpath, kind, store=True, info=None):
         """Record a file in the manifest, optionally materialising it in the store.
 
         Every file is manifested -- including the ones whose content is inlined
@@ -393,8 +394,16 @@ class _Converter:
                 existing["stored"] = True
             return existing
 
-        key = annex_key(path)
-        if os.path.islink(path) and not os.path.exists(path):
+        key = (
+            annex_key_from_target(info.target)
+            if info is not None and info.is_link
+            else (None if info is not None else annex_key(path))
+        )
+        if (
+            info.dangling
+            if info is not None
+            else (os.path.islink(path) and not os.path.exists(path))
+        ):
             # dangling annex symlink: content was never fetched, so the payload
             # cannot be hashed.  The annex key still carries the upstream size
             # and content hash, which is enough to reference the file.
@@ -465,25 +474,26 @@ class _Converter:
 
     # -- dispatch -------------------------------------------------------
 
-    def convert(self, path, relpath, linkonly=False):
+    def convert(self, info, linkonly=False):
         """Return the JSON value for one source file."""
+        path, relpath = info.path, info.relpath
         ext = fileext(relpath)
         fname = os.path.basename(relpath)
-        dangling = os.path.islink(path) and not os.path.exists(path)
+        self._info = info
 
-        if dangling:
+        if info.dangling:
             self._count("link-dangling")
-            return self._link(self._register(path, relpath, "dangling"))
+            return self._link(self._register(path, relpath, "dangling", info=info))
 
-        try:
-            size = os.path.getsize(path)
-        except OSError as err:
-            self.errors.append("%s: %s" % (relpath, err))
-            return {"_DataLink_": "missing:%s" % relpath}
+        if not info.present:
+            self.errors.append("%s: could not be stat()ed" % relpath)
+            self._count("unreadable")
+            return {"_DataLink_": "unreadable:%s" % relpath}
 
+        size = info.size
         if size == 0:
             self._count("empty")
-            self._register(path, relpath, "empty", store=False)
+            self._register(path, relpath, "empty", store=False, info=info)
             return {}
 
         if linkonly:
@@ -531,7 +541,7 @@ class _Converter:
         that.
         """
         try:
-            entry = self._register(path, relpath, kind)
+            entry = self._register(path, relpath, kind, info=self._info)
         except OSError as err:
             self.errors.append("%s: unreadable: %s" % (relpath, err))
             self._count("unreadable")
@@ -544,10 +554,10 @@ class _Converter:
     def _text(self, path, relpath, size):
         if size > self.config["max_text"]:
             self._count("text-linked")
-            return self._link(self._register(path, relpath, "text"))
+            return self._link(self._register(path, relpath, "text", info=self._info))
         with open(path, "r", encoding="utf-8", errors="replace") as fid:
             text = fid.read()
-        self._register(path, relpath, "text", store=False)
+        self._register(path, relpath, "text", store=False, info=self._info)
         self._count("text")
         return text
 
@@ -563,10 +573,10 @@ class _Converter:
         """
         if size > self.config["max_json"]:
             self._count("json-linked")
-            return self._link(self._register(path, relpath, "json"))
+            return self._link(self._register(path, relpath, "json", info=self._info))
         with open(path, "r", encoding="utf-8-sig", errors="replace") as fid:
             text = fid.read()
-        self._register(path, relpath, "json", store=False)
+        self._register(path, relpath, "json", store=False, info=self._info)
         if not text.strip():
             # a sidecar holding only whitespace is empty in intent; several
             # OpenNeuro datasets ship one-byte "\n" placeholders
@@ -591,19 +601,19 @@ class _Converter:
         always = fname.startswith("participants.") or fname.endswith("_scans.tsv")
         if size > self.config["max_tsv"] and not always:
             self._count("tsv-linked")
-            return self._link(self._register(path, relpath, "tabular"))
+            return self._link(self._register(path, relpath, "tabular", info=self._info))
         delim = "," if fileext(fname).startswith(".csv") else "\t"
         data = load_csv_tsv(path, delimiter=delim, return_dict=True, convert_numeric=True)
-        self._register(path, relpath, "tabular", store=False)
+        self._register(path, relpath, "tabular", store=False, info=self._info)
         self._count("tsv")
         return data
 
     def _bvec(self, path, relpath, size):
         if size > self.config["max_bvec"]:
             self._count("bvec-linked")
-            return self._link(self._register(path, relpath, "bvec"))
+            return self._link(self._register(path, relpath, "bvec", info=self._info))
         data = np.genfromtxt(path, dtype=np.float32)
-        self._register(path, relpath, "bvec", store=False)
+        self._register(path, relpath, "bvec", store=False, info=self._info)
         self._count("bvec")
         return data
 
@@ -615,7 +625,7 @@ class _Converter:
         """
         from .jnifti import niiheader, niiheader2jnii
 
-        entry = self._register(path, relpath, "nifti")
+        entry = self._register(path, relpath, "nifti", info=self._info)
         try:
             jnii = niiheader2jnii(niiheader(path))
         except Exception as err:
@@ -630,7 +640,7 @@ class _Converter:
     def _gifti(self, path, relpath, size):
         from .jgifti import gii2jgii
 
-        entry = self._register(path, relpath, "gifti")
+        entry = self._register(path, relpath, "gifti", info=self._info)
         if size > self.config["max_json"]:
             jgii = {"GIFTIObject": self._link(entry)}
             self._count("gifti-linked")
@@ -643,7 +653,7 @@ class _Converter:
         """Inline SNIRF metadata; link the measurement arrays to the store."""
         from .njdigest import snirf_digest
 
-        entry = self._register(path, relpath, "snirf")
+        entry = self._register(path, relpath, "snirf", info=self._info)
         digest = snirf_digest(path, maxelem=self.config.get("max_snirf_elem", 4096))
         digest["SNIRFObject"] = self._link(entry)
         self._count("snirf")
@@ -652,7 +662,7 @@ class _Converter:
     def _eeglab(self, path, relpath, size):
         from .njdigest import eeglab_digest
 
-        entry = self._register(path, relpath, "eeglab")
+        entry = self._register(path, relpath, "eeglab", info=self._info)
         digest = eeglab_digest(path, maxelem=self.config.get("max_h5_elem", 4096))
         digest["EEGLABObject"] = self._link(entry)
         self._count("eeglab")
@@ -661,7 +671,7 @@ class _Converter:
     def _hdf5(self, path, relpath, size):
         from .njdigest import hdf5_digest
 
-        entry = self._register(path, relpath, "hdf5")
+        entry = self._register(path, relpath, "hdf5", info=self._info)
         digest = {
             "HDF5Data": hdf5_digest(path, maxelem=self.config.get("max_h5_elem", 4096)),
             "HDF5Object": self._link(entry),
@@ -679,7 +689,7 @@ class _Converter:
         """
         from .njdigest import hdf5_digest, is_matfile, mat_digest, vest_header
 
-        entry = self._register(path, relpath, "mat")
+        entry = self._register(path, relpath, "mat", info=self._info)
         if not is_matfile(path):
             vest = vest_header(path)
             if vest:
@@ -702,14 +712,14 @@ class _Converter:
     def _brainvision(self, path, relpath, size):
         from .njdigest import bvheader
 
-        self._register(path, relpath, "brainvision", store=False)
+        self._register(path, relpath, "brainvision", store=False, info=self._info)
         self._count("brainvision")
         return bvheader(path)
 
     def _edf(self, path, relpath, size):
         from .njdigest import edfheader
 
-        entry = self._register(path, relpath, "edf")
+        entry = self._register(path, relpath, "edf", info=self._info)
         digest = edfheader(path)
         digest["EDFObject"] = self._link(entry)
         self._count("edf")
@@ -721,17 +731,91 @@ class _Converter:
 # =============================================================================
 
 
+class FileInfo:
+    """What one directory entry is, gathered once.
+
+    A conversion pass over this corpus makes tens of millions of metadata calls,
+    and on spinning disks that -- not payload bandwidth -- is the wall.  The
+    naive sequence per file was ``islink`` + ``exists`` + ``getsize`` +
+    ``islink`` + ``readlink``: five syscalls, four of which re-ask the kernel
+    something the directory read already answered.  ``os.scandir`` hands back an
+    entry whose type comes free from the directory block and whose ``stat`` is
+    cached, so a regular file now costs one ``lstat`` and a symlink one
+    ``lstat`` plus a ``readlink``.
+    """
+
+    __slots__ = ("path", "relpath", "is_link", "present", "size", "target")
+
+    def __init__(self, path, relpath, is_link, present, size, target):
+        self.path = path
+        self.relpath = relpath
+        self.is_link = is_link
+        self.present = present
+        self.size = size
+        self.target = target
+
+    @property
+    def dangling(self):
+        return self.is_link and not self.present
+
+
 def _walk(root, skip_hidden=True):
-    """Deterministic recursive file listing, relative to ``root``."""
+    """Deterministic recursive file listing, relative to ``root``.
+
+    Returns :class:`FileInfo` objects.  Ordering is by sorted directory name
+    then sorted file name at every level, so the document is built in the same
+    order on every run.
+    """
     out = []
-    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
-        dirnames[:] = sorted(d for d in dirnames if not (skip_hidden and d.startswith(".")))
-        for name in sorted(filenames):
-            if skip_hidden and name.startswith("."):
+
+    def visit(dirpath):
+        try:
+            with os.scandir(dirpath) as entries:
+                items = list(entries)
+        except OSError:
+            return
+        dirs, files = [], []
+        for entry in items:
+            if skip_hidden and entry.name.startswith("."):
                 continue
-            full = os.path.join(dirpath, name)
-            out.append((full, os.path.relpath(full, root).replace(os.sep, "/")))
+            try:
+                isdir = entry.is_dir(follow_symlinks=False)
+            except OSError:
+                isdir = False
+            (dirs if isdir else files).append(entry)
+        for entry in sorted(files, key=lambda e: e.name):
+            out.append(_info(entry, root))
+        for entry in sorted(dirs, key=lambda e: e.name):
+            visit(entry.path)
+
+    visit(root)
     return out
+
+
+def _info(entry, root):
+    relpath = os.path.relpath(entry.path, root).replace(os.sep, "/")
+    try:
+        is_link = entry.is_symlink()
+    except OSError:
+        is_link = False
+    target = None
+    present = True
+    size = 0
+    if is_link:
+        try:
+            target = os.readlink(entry.path)
+        except OSError:
+            target = None
+        try:
+            size = entry.stat(follow_symlinks=True).st_size
+        except OSError:
+            present = False
+    else:
+        try:
+            size = entry.stat(follow_symlinks=False).st_size
+        except OSError:
+            present = False
+    return FileInfo(entry.path, relpath, is_link, present, size, target)
 
 
 def _prehash(files, cas, threads):
@@ -753,12 +837,12 @@ def _prehash(files, cas, threads):
     from concurrent.futures import ThreadPoolExecutor
 
     targets = []
-    for path, _relpath in files:
-        if os.path.islink(path) and not os.path.exists(path):
+    for info in files:
+        if info.dangling:
             continue  # content never fetched; nothing to hash
-        key = annex_key(path)
+        key = annex_key_from_target(info.target) if info.is_link else None
         if key:
-            targets.append((path, key))
+            targets.append((info.path, key))
     if not targets:
         return 0
 
@@ -839,7 +923,8 @@ def bids2json(dspath, dbname=None, dsname=None, cas=None, casroot=None, **kwargs
     doc = {}
     split = {name: {} for name in split_dirs}
 
-    for path, relpath in files:
+    for info in files:
+        path, relpath = info.path, info.relpath
         keys = relpath.split("/")
         top = keys[0]
         if top in split_dirs and len(keys) > 1:
@@ -850,7 +935,7 @@ def bids2json(dspath, dbname=None, dsname=None, cas=None, casroot=None, **kwargs
         else:
             target, keypath, linkonly = doc, keys, False
 
-        value = conv.convert(path, relpath, linkonly=linkonly)
+        value = conv.convert(info, linkonly=linkonly)
         if isinstance(value, np.ndarray):
             value = value.tolist()
         _setpath(target, keypath, value)
