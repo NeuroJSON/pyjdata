@@ -897,18 +897,20 @@ def loadbj(fname, **kwargs):
     return loadb(fname, **kwargs)
 
 
-def savebj(fname, **kwargs):
+def savebj(data, fname=None, opt=None, **kwargs):
     """
     Save data to a binary BJData file. Alias for saveb().
 
     Args:
+        data: The Python data structure to save.
         fname (str): Output BJData file path.
+        opt (dict, optional): Legacy options dict merged into kwargs.
         **kwargs: Options passed to saveb().
 
     Returns:
         None
     """
-    return saveb(fname, **kwargs)
+    return saveb(data, fname, opt, **kwargs)
 
 
 def loadubjson(*varargin, **kwargs):

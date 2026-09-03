@@ -92,12 +92,36 @@ _allownumpy = (
 ##====================================================================================
 
 
-def _compress_data(rawbytes, opt):
-    """Compress raw bytes using the codec specified in opt['compression']."""
+def _compress_data(rawbytes, opt, typesize=None):
+    """Compress raw bytes using the codec specified in opt['compression'].
+
+    ``opt['nthread']`` above 1 selects a multi-threaded implementation where one
+    exists.  For zlib and gzip that is :mod:`jdata.zlibmt`, whose output is an
+    ordinary stream any decompressor reads, and is a pure function of the input
+    (independent of the thread count) so it stays reproducible.
+    """
     codec = opt["compression"]
+    # An explicit nthread -- even 1 -- selects the block-wise implementation, so
+    # that output bytes depend only on the data and not on how many threads the
+    # caller had.  Its absence keeps the historical single-stream output, so
+    # existing callers see no change in the bytes they produce.
+    threaded = "nthread" in opt and opt["nthread"] is not None
+    nthread = int(opt.get("nthread", 1) or 1)
     if codec == "zlib":
+        if threaded:
+            # deflate independent blocks concurrently and concatenate them into
+            # one ordinary zlib stream; see jdata.zlibmt.  Output is a pure
+            # function of (data, level, blocksize), so it does not vary with the
+            # thread count and stays reproducible.
+            from .zlibmt import compress as zlibmt_compress
+
+            return zlibmt_compress(rawbytes, nthread=nthread)
         return zlib.compress(rawbytes)
     elif codec == "gzip":
+        if threaded:
+            from .zlibmt import gzip_compress
+
+            return gzip_compress(rawbytes, nthread=nthread)
         gzipper = zlib.compressobj(wbits=(zlib.MAX_WBITS | 16))
         result = gzipper.compress(rawbytes)
         result += gzipper.flush()
@@ -118,8 +142,10 @@ def _compress_data(rawbytes, opt):
             "blosc2zlib": blosc2.Codec.ZLIB,
             "blosc2zstd": blosc2.Codec.ZSTD,
         }
-        nthread = opt.get("nthread", 1)
-        return blosc2.compress2(rawbytes, codec=BLOSC2CODEC[codec], nthreads=nthread)
+        kwargs = {"nthreads": opt.get("nthread", 1)}
+        if typesize:
+            kwargs["typesize"] = typesize
+        return blosc2.compress2(rawbytes, codec=BLOSC2CODEC[codec], **kwargs)
     elif codec == "base64":
         return rawbytes
     return rawbytes
@@ -294,50 +320,19 @@ def encode(d, opt=None, **kwargs):
                 )
             newobj["_ArrayZipType_"] = opt["compression"]
             newobj["_ArrayZipSize_"] = [1 + int("_ArrayIsComplex_" in newobj), d.size]
-            newobj["_ArrayZipData_"] = newobj["_ArrayData_"].data
-            if opt["compression"] == "zlib":
-                newobj["_ArrayZipData_"] = zlib.compress(newobj["_ArrayZipData_"])
-            elif opt["compression"] == "gzip":
-                gzipper = zlib.compressobj(wbits=(zlib.MAX_WBITS | 16))
-                newobj["_ArrayZipData_"] = gzipper.compress(newobj["_ArrayZipData_"])
-                newobj["_ArrayZipData_"] += gzipper.flush()
-            elif opt["compression"] == "lzma":
-                try:
-                    newobj["_ArrayZipData_"] = lzma.compress(
-                        newobj["_ArrayZipData_"], lzma.FORMAT_ALONE
-                    )
-                except Exception:
-                    print('you must install "lzma" module to compress with this format, ignoring')
-                    pass
-            elif opt["compression"] == "lz4":
-                try:
-                    newobj["_ArrayZipData_"] = lz4.frame.compress(
-                        newobj["_ArrayZipData_"].tobytes()
-                    )
-                except ImportError:
-                    print('you must install "lz4" module to compress with this format, ignoring')
-                    pass
-            elif opt["compression"].startswith("blosc2"):
-                try:
-                    BLOSC2CODEC = {
-                        "blosc2blosclz": blosc2.Codec.BLOSCLZ,
-                        "blosc2lz4": blosc2.Codec.LZ4,
-                        "blosc2lz4hc": blosc2.Codec.LZ4HC,
-                        "blosc2zlib": blosc2.Codec.ZLIB,
-                        "blosc2zstd": blosc2.Codec.ZSTD,
-                    }
-                    blosc2nthread = 1
-                    if "nthread" in opt:
-                        blosc2nthread = opt["nthread"]
-                    newobj["_ArrayZipData_"] = blosc2.compress2(
-                        newobj["_ArrayZipData_"],
-                        codec=BLOSC2CODEC[opt["compression"]],
-                        typesize=d.dtype.itemsize,
-                        nthreads=blosc2nthread,
-                    )
-                except ImportError:
-                    print('you must install "blosc2" module to compress with this format, ignoring')
-                    pass
+            # one codec dispatch, shared with the sparse path: this branch used
+            # to repeat it inline and call zlib.compress directly, which meant
+            # the dense array case -- the common one -- silently ignored nthread
+            try:
+                newobj["_ArrayZipData_"] = _compress_data(
+                    newobj["_ArrayData_"].data, opt, typesize=d.dtype.itemsize
+                )
+            except ImportError:
+                print(
+                    'you must install the "%s" module to compress with this format, ignoring'
+                    % opt["compression"]
+                )
+                newobj["_ArrayZipData_"] = newobj["_ArrayData_"].data
             if (("base64" in opt) and (opt["base64"])) or opt["compression"] == "base64":
                 newobj["_ArrayZipData_"] = base64.b64encode(newobj["_ArrayZipData_"])
             newobj.pop("_ArrayData_")

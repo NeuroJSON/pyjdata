@@ -46,6 +46,7 @@ from . import jpath
 from . import jschema
 from . import njprep
 from . import neurojson
+from . import zlibmt
 from . import njcas
 from . import njdigest
 from . import njbids
@@ -64,6 +65,7 @@ from .jpath import *
 from .jschema import *
 from .njprep import *
 from .neurojson import *
+from .zlibmt import *
 from .njcas import *
 from .njdigest import *
 from .njbids import *
@@ -86,6 +88,7 @@ __all__ = (
     + jschema.__all__
     + njprep.__all__
     + neurojson.__all__
+    + zlibmt.__all__
     + njcas.__all__
     + njdigest.__all__
     + njbids.__all__
@@ -103,6 +106,7 @@ __all__ = (
         "jschema",
         "neurojson",
         "njprep",
+        "zlibmt",
         "njcas",
         "njdigest",
         "njbids",
