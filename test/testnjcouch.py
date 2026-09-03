@@ -14,6 +14,7 @@ import sys
 import json
 import shutil
 import tempfile
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -276,3 +277,115 @@ class TestLiveServerReadOnly(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(
+    os.environ.get("NEUROJSON_TEST_SERVER") and os.environ.get("NEUROJSON_TEST_DB"),
+    "set NEUROJSON_TEST_SERVER and NEUROJSON_TEST_DB (a scratch database) to run",
+)
+class TestLivePushSemantics(unittest.TestCase):
+    """Verify the publish contract against a real CouchDB.
+
+    The node simulator in test/testnjviews.py checks the handler *logic*; this
+    checks that CouchDB itself compiles the design document, that a POST to the
+    update handler resolves ``_rev`` server-side, and that the timestamp
+    metadata behaves as designed.  Those are the parts that would only fail at
+    deploy time.
+
+    Creates a temporary design document and one document, both prefixed
+    ``njtest``, and removes them again in tearDownClass.
+    """
+
+    DDOC = "njtest"
+    DOCID = "njtest-push-probe"
+
+    @classmethod
+    def setUpClass(cls):
+        from jdata.njcouch import design_from_dir
+
+        cls.db = os.environ["NEUROJSON_TEST_DB"]
+        cls.couch = CouchDB(
+            os.environ["NEUROJSON_TEST_SERVER"],
+            netrc_machine=os.environ.get("NEUROJSON_TEST_NETRC", "neurojson.io"),
+        )
+        cls.couch.put_design(
+            cls.db, design_from_dir(os.path.join(ROOT, "neurojson", "design", "qq")), name=cls.DDOC
+        )
+        cls.doc = {
+            ".neurojson": {
+                "Version": "1.2.3",
+                "VersionSource": "git-tag",
+                "SourceCommit": "0" * 40,
+                "Fingerprint": "a" * 64,
+                "Tags": ["1.2.3"],
+                "Files": 2,
+                "Bytes": 1234,
+            },
+            "dataset_description.json": {"Name": "njtest probe", "BIDSVersion": "1.8.0"},
+            "README": "temporary test document",
+            "participants.tsv": {"participant_id": ["sub-01"], "age": [33], "sex": ["F"]},
+            "sub-01": {
+                "anat": {
+                    "sub-01_T1w.nii.gz": {
+                        "_DataLink_": (
+                            "https://neurojson.io/io/cas.cgi?action=get&db=%s&doc=%s"
+                            "&hash=sha256:%s&size=99&file=sub-01/anat/sub-01_T1w.nii.gz"
+                        )
+                        % (cls.db, cls.DOCID, "b" * 64)
+                    }
+                }
+            },
+        }
+
+    @classmethod
+    def tearDownClass(cls):
+        for remove in (
+            lambda: cls.couch.delete_doc(cls.db, cls.DOCID),
+            lambda: cls.couch.request(
+                "DELETE",
+                "/%s/_design/%s?rev=%s"
+                % (cls.db, cls.DDOC, cls.couch.get_design(cls.db, cls.DDOC)["_rev"]),
+            ),
+        ):
+            try:
+                remove()
+            except Exception:
+                pass
+
+    def test_push_creates_then_updates_with_stable_createtime(self):
+        self.couch.push(self.db, self.DOCID, self.doc, design=self.DDOC)
+        first = self.couch.get_doc(self.db, self.DOCID)
+        time.sleep(1.1)
+        self.couch.push(self.db, self.DOCID, self.doc, design=self.DDOC)
+        second = self.couch.get_doc(self.db, self.DOCID)
+
+        self.assertNotEqual(first["_rev"], second["_rev"])
+        self.assertEqual(first[".neurojson"]["CreateTime"], second[".neurojson"]["CreateTime"])
+        self.assertGreater(second[".neurojson"]["UpdateTime"], first[".neurojson"]["UpdateTime"])
+        self.assertEqual(second[".neurojson"]["Version"], "1.2.3")
+        self.assertEqual(second[".neurojson"]["Fingerprint"], "a" * 64)
+
+    def test_server_ignores_client_supplied_timestamps(self):
+        self.couch.push(self.db, self.DOCID, self.doc, design=self.DDOC)
+        genuine = self.couch.get_doc(self.db, self.DOCID)[".neurojson"]["CreateTime"]
+        forged = dict(self.doc)
+        forged[".neurojson"] = dict(self.doc[".neurojson"], CreateTime=1.0, UpdateTime=2.0)
+        self.couch.push(self.db, self.DOCID, forged, design=self.DDOC)
+        after = self.couch.get_doc(self.db, self.DOCID)[".neurojson"]
+        self.assertEqual(after["CreateTime"], genuine)
+        self.assertGreater(after["UpdateTime"], 2.0)
+
+    def test_views_execute_inside_couchdb(self):
+        self.couch.push(self.db, self.DOCID, self.doc, design=self.DDOC)
+        for view in ("dbinfo", "subjects", "links", "versions", "updatetime"):
+            res = self.couch.view(self.db, view, design=self.DDOC, limit=500)
+            rows = [r for r in res["rows"] if r["id"] == self.DOCID]
+            self.assertEqual(len(rows), 1, "view %s produced %d rows" % (view, len(rows)))
+        links = [
+            r
+            for r in self.couch.view(self.db, "links", design=self.DDOC, limit=500)["rows"]
+            if r["id"] == self.DOCID
+        ]
+        self.assertEqual(links[0]["key"][1], ".nii.gz")
+        self.assertEqual(links[0]["value"]["algo"], "sha256")
+        self.assertEqual(links[0]["value"]["hash"], "b" * 64)

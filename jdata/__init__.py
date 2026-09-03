@@ -50,6 +50,7 @@ from . import njcas
 from . import njdigest
 from . import njbids
 from . import njcouch
+from . import njdoi
 
 # Re-export all public functions from submodules
 from .jdata import *
@@ -67,6 +68,7 @@ from .njcas import *
 from .njdigest import *
 from .njbids import *
 from .njcouch import *
+from .njdoi import *
 
 # njcli is deliberately not star-imported: its `main` is a console entry point,
 # not part of the library API.
@@ -88,6 +90,7 @@ __all__ = (
     + njdigest.__all__
     + njbids.__all__
     + njcouch.__all__
+    + njdoi.__all__
     + [
         "jdata",
         "jfile",
@@ -104,6 +107,7 @@ __all__ = (
         "njdigest",
         "njbids",
         "njcouch",
+        "njdoi",
     ]
 )
 

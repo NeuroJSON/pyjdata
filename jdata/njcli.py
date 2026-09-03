@@ -438,6 +438,47 @@ def cmd_cas(args):
     return 0
 
 
+def cmd_doi(args):
+    """Emit a DataCite record per dataset version, next to the version archive."""
+    from .njdoi import datacite
+
+    written = 0
+    for dsname, version, docpath, _splits in _iter_published(args.output, args.ds):
+        vdir = os.path.dirname(docpath)
+        with open(docpath, "r", encoding="utf-8") as fid:
+            doc = json.load(fid)
+        manifest = []
+        mpath = os.path.join(vdir, "manifest.tsv")
+        if os.path.isfile(mpath):
+            with open(mpath, "r", encoding="utf-8") as fid:
+                for line in fid:
+                    parts = line.rstrip("\n").split("\t")
+                    if len(parts) == 3:
+                        manifest.append(
+                            {"sha256": parts[0], "size": int(parts[1] or 0), "path": parts[2]}
+                        )
+        record = datacite(
+            doc,
+            args.db,
+            dsname,
+            manifest=manifest,
+            publisher=args.publisher,
+            landing_base=args.landing_base,
+            publication_year=args.year,
+        )
+        text = json.dumps(record, indent=1, sort_keys=True)
+        if args.stdout:
+            print(text)
+        else:
+            _write_atomic(os.path.join(vdir, "datacite.json"), text)
+            written += 1
+            if args.verbose:
+                print("  %-12s %-14s %s" % (dsname, version, record.get("titles")[0]["title"][:50]))
+    if not args.stdout:
+        print("wrote %d datacite.json record(s)" % written)
+    return 0
+
+
 def cmd_report(args):
     rows = []
     for dsname, version, docpath, splits in _iter_published(args.output, args.ds):
@@ -554,6 +595,17 @@ def build_parser():
     cas.add_argument("--cas", required=True)
     cas.add_argument("--sample", type=int, default=200)
     cas.set_defaults(func=cmd_cas)
+
+    doi = sub.add_parser("doi", help="emit DataCite metadata per dataset version")
+    doi.add_argument("--output", required=True)
+    doi.add_argument("--db", required=True)
+    doi.add_argument("--ds", nargs="*")
+    doi.add_argument("--publisher", default="NeuroJSON")
+    doi.add_argument("--landing-base", default="https://neurojson.io/db")
+    doi.add_argument("--year", type=int)
+    doi.add_argument("--stdout", action="store_true", help="print instead of writing files")
+    doi.add_argument("--verbose", action="store_true")
+    doi.set_defaults(func=cmd_doi)
 
     rep = sub.add_parser("report", help="summarise converted output")
     rep.add_argument("--output", required=True)
