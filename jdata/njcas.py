@@ -361,20 +361,56 @@ class CAS:
                 if not name.endswith(".tmp") and ".tmp." not in name:
                     yield os.path.join(dirpath, name)
 
-    def verify(self, sample=None, seed=0):
-        """Re-hash stored objects and report mismatches.
+    def sample_objects(self, count, seed=0):
+        """Return up to ``count`` object paths without walking the whole store.
 
-        ``sample`` limits the check to a pseudo-random subset (by count).
-        Returns a dict with ``checked``, ``ok``, ``bad`` (list of digests) and
-        ``hardlinks`` (number of objects sharing an inode with something else,
-        i.e. proof the store is not holding private copies).
+        A full ``os.walk`` of the object tree costs one directory read per
+        two-level prefix, which for a store holding millions of objects is far
+        more work than the check itself.  Sampling random prefixes gives a
+        usable spot check at a cost that does not grow with the store.
         """
         import random
 
-        paths = list(self.iterobjects())
-        if sample and sample < len(paths):
-            random.Random(seed).shuffle(paths)
-            paths = paths[:sample]
+        rng = random.Random(seed)
+        try:
+            outer = sorted(os.listdir(self.objroot))
+        except OSError:
+            return []
+        rng.shuffle(outer)
+        picked = []
+        for first in outer:
+            firstdir = os.path.join(self.objroot, first)
+            try:
+                inner = sorted(os.listdir(firstdir))
+            except OSError:
+                continue
+            rng.shuffle(inner)
+            for second in inner:
+                seconddir = os.path.join(firstdir, second)
+                try:
+                    names = [n for n in os.listdir(seconddir) if ".tmp." not in n]
+                except OSError:
+                    continue
+                rng.shuffle(names)
+                for name in names:
+                    picked.append(os.path.join(seconddir, name))
+                    if len(picked) >= count:
+                        return picked
+        return picked
+
+    def verify(self, sample=None, seed=0):
+        """Re-hash stored objects and report mismatches.
+
+        ``sample`` limits the check to a pseudo-random subset (by count),
+        selected without enumerating the whole store.  Returns a dict with
+        ``checked``, ``ok``, ``bad`` (list of digests) and ``hardlinks`` (the
+        number of objects sharing an inode with something else, i.e. evidence
+        the store is not holding private copies).
+        """
+        if sample:
+            paths = self.sample_objects(sample, seed=seed)
+        else:
+            paths = list(self.iterobjects())
         report = {"checked": 0, "ok": 0, "bad": [], "hardlinks": 0, "bytes": 0}
         for path in paths:
             expect = os.path.basename(path)

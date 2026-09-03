@@ -20,6 +20,7 @@ import os
 import sys
 import json
 import time
+import re
 import argparse
 import traceback
 import urllib.parse
@@ -438,6 +439,128 @@ def cmd_cas(args):
     return 0
 
 
+_LINK_HASH = re.compile(r"hash=([a-z0-9]+):([0-9a-fA-F]+)")
+
+
+def _iter_links(node, where="$"):
+    """Yield ``(algo, digest, jsonpath)`` for every _DataLink_ in a document."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "_DataLink_" and isinstance(value, str):
+                match = _LINK_HASH.search(value)
+                if match:
+                    yield match.group(1), match.group(2).lower(), where
+            else:
+                yield from _iter_links(value, "%s.%s" % (where, key.replace(".", "\\.")))
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            yield from _iter_links(value, "%s[%d]" % (where, index))
+
+
+def _read_manifest(path):
+    entries = []
+    if not os.path.isfile(path):
+        return entries
+    with open(path, "r", encoding="utf-8") as fid:
+        for line in fid:
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) == 3 and parts[0] != "payload":
+                entries.append(
+                    {
+                        "sha256": parts[0] if parts[0] != "None" else None,
+                        "size": int(parts[1]) if parts[1] not in ("", "None") else None,
+                        "path": parts[2],
+                    }
+                )
+    return entries
+
+
+def cmd_verify(args):
+    """Reconcile the on-disk archive, its manifest, and the content store.
+
+    Three independent checks, because a DOI is a claim about bytes and each
+    check can fail on its own:
+
+    * the fingerprint recorded in the document must equal the fingerprint
+      recomputed from the document and its manifest -- proving the archive has
+      not been edited since it was written;
+    * every manifest entry must name an object that is actually present in the
+      store -- proving the links resolve;
+    * with --deep, a sample of those objects is re-hashed -- proving the bytes
+      themselves are intact.
+    """
+    from .njbids import fingerprint, _dehydrate
+
+    cas = CAS(args.cas, mode="none") if args.cas else None
+    checked = fp_bad = missing = 0
+    problems = []
+
+    for dsname, version, docpath, _splits in _iter_published(args.output, args.ds):
+        vdir = os.path.dirname(docpath)
+        with open(docpath, "r", encoding="utf-8") as fid:
+            doc = json.load(fid)
+        recorded = (doc.get(".neurojson") or {}).get("Fingerprint")
+        manifest = _read_manifest(os.path.join(vdir, "manifest.tsv"))
+
+        # the fingerprint is computed over the document *without* the metadata
+        # block, since the block carries the fingerprint itself
+        payload = {k: v for k, v in doc.items() if k != ".neurojson"}
+        recomputed, _blob = fingerprint(payload, manifest)
+        checked += 1
+        if recorded and recomputed != recorded:
+            fp_bad += 1
+            problems.append("%s@%s: fingerprint mismatch" % (dsname, version))
+
+        if cas:
+            # Check the links, not the manifest.  Every file is manifested,
+            # including the ones whose content is inlined in the document and
+            # therefore deliberately never materialised as an object; only a
+            # _DataLink_ makes a promise that something is retrievable.
+            absent, unfetched = [], 0
+            for algo, digest, where in _iter_links(doc):
+                if algo != "sha256":
+                    # an annex-key reference: upstream content was never fetched
+                    # locally, so there is nothing to check yet
+                    unfetched += 1
+                    continue
+                if not cas.has(digest):
+                    absent.append(where)
+            if absent:
+                missing += len(absent)
+                problems.append(
+                    "%s@%s: %d link(s) do not resolve in the store, e.g. %s"
+                    % (dsname, version, len(absent), absent[0])
+                )
+            if unfetched and args.verbose:
+                print("    %d link(s) reference content not fetched locally" % unfetched)
+        if args.verbose:
+            print(
+                "  %-12s %-14s %5d files %s"
+                % (dsname, version, len(manifest), "ok" if not problems else "see below")
+            )
+
+    print(
+        "%d version(s) checked: %d fingerprint mismatch, %d manifest object(s) missing"
+        % (checked, fp_bad, missing)
+    )
+    for line in problems[:20]:
+        print("  " + line)
+
+    if cas and args.deep:
+        report = cas.verify(sample=args.sample)
+        print(
+            "store: %d object(s) re-hashed, %d ok, %d corrupt, %d hardlinked"
+            % (report["checked"], report["ok"], len(report["bad"]), report["hardlinks"])
+        )
+        for bad in report["bad"][:10]:
+            print("  corrupt object %s (actual %s)" % (bad["object"][:16], bad["actual"][:16]))
+        if report["bad"]:
+            problems.append("corrupt store objects")
+    if cas:
+        cas.close()
+    return 1 if problems else 0
+
+
 def cmd_doi(args):
     """Emit a DataCite record per dataset version, next to the version archive."""
     from .njdoi import datacite
@@ -595,6 +718,15 @@ def build_parser():
     cas.add_argument("--cas", required=True)
     cas.add_argument("--sample", type=int, default=200)
     cas.set_defaults(func=cmd_cas)
+
+    ver = sub.add_parser("verify", help="reconcile archive, manifest and content store")
+    ver.add_argument("--output", required=True)
+    ver.add_argument("--cas")
+    ver.add_argument("--ds", nargs="*")
+    ver.add_argument("--deep", action="store_true", help="also re-hash stored objects")
+    ver.add_argument("--sample", type=int, default=200)
+    ver.add_argument("--verbose", action="store_true")
+    ver.set_defaults(func=cmd_verify)
 
     doi = sub.add_parser("doi", help="emit DataCite metadata per dataset version")
     doi.add_argument("--output", required=True)

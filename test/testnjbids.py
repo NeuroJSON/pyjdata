@@ -515,3 +515,12 @@ class TestMalformedInputs(unittest.TestCase):
         self.assertIn("sub-02_T1w.nii.gz", result["doc"]["sub-02"]["anat"])
         self.assertIn("participant_id", result["doc"]["participants.tsv"])
         self.assertEqual(len(result["errors"]), 2)
+
+    def test_whitespace_only_json_is_treated_as_empty(self):
+        """Several OpenNeuro datasets ship one-byte "\\n" sidecar placeholders."""
+        target = os.path.join(self.ds, "sub-01", "anat", "sub-01_T1w.json")
+        with open(target, "w") as fid:
+            fid.write("\n")
+        result = self._convert()
+        self.assertEqual(result["errors"], [])
+        self.assertEqual(result["doc"]["sub-01"]["anat"]["sub-01_T1w.json"], {})

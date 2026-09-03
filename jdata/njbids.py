@@ -466,6 +466,11 @@ class _Converter:
         with open(path, "r", encoding="utf-8-sig", errors="replace") as fid:
             text = fid.read()
         self._register(path, relpath, "json", store=False)
+        if not text.strip():
+            # a sidecar holding only whitespace is empty in intent; several
+            # OpenNeuro datasets ship one-byte "\n" placeholders
+            self._count("json-empty")
+            return {}
         try:
             data = json.loads(text)
         except ValueError as err:

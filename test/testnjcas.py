@@ -290,3 +290,42 @@ class TestMemoConcurrency(unittest.TestCase):
         self.assertEqual(size, 7)
         self.assertGreater(cas.stats["memo_errors"], 0)
         cas.close()
+
+
+class TestSampling(unittest.TestCase):
+    """Sampling must not require enumerating the whole store."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.cas = CAS(os.path.join(self.root, "cas"), commit_every=1)
+        for i in range(40):
+            path = os.path.join(self.root, "f%d.bin" % i)
+            with open(path, "wb") as fid:
+                fid.write(b"payload-%d" % i)
+            self.cas.put(path)
+
+    def tearDown(self):
+        self.cas.close()
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def test_sample_returns_the_requested_count(self):
+        picked = self.cas.sample_objects(10)
+        self.assertEqual(len(picked), 10)
+        self.assertEqual(len(set(picked)), 10)
+        for path in picked:
+            self.assertTrue(os.path.exists(path))
+
+    def test_sample_is_capped_by_store_size(self):
+        self.assertEqual(len(self.cas.sample_objects(1000)), 40)
+
+    def test_sample_is_deterministic_for_a_given_seed(self):
+        self.assertEqual(self.cas.sample_objects(8, seed=7), self.cas.sample_objects(8, seed=7))
+
+    def test_different_seeds_generally_differ(self):
+        self.assertNotEqual(self.cas.sample_objects(8, seed=1), self.cas.sample_objects(8, seed=99))
+
+    def test_verify_with_sample_checks_only_the_sample(self):
+        report = self.cas.verify(sample=6)
+        self.assertEqual(report["checked"], 6)
+        self.assertEqual(report["ok"], 6)
+        self.assertEqual(report["bad"], [])
