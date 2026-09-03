@@ -260,7 +260,7 @@ def fingerprint(doc, manifest):
     import hashlib
 
     lines = [
-        "%s\t%d\t%s" % (entry["sha256"], entry["size"], entry["path"])
+        "%s\t%d\t%s" % (entry["sha256"], entry.get("size") or 0, entry["path"])
         for entry in sorted(manifest, key=lambda e: e["path"])
     ]
     lines.append(
@@ -398,7 +398,11 @@ class _Converter:
             entry = {
                 "path": relpath,
                 "sha256": None,
-                "size": info.get("size"),
+                # A dangling link that is not a git-annex key -- a broken
+                # relative symlink, or one pointing outside the dataset -- has
+                # no recoverable size, so record zero rather than None: the
+                # manifest line is formatted numerically.
+                "size": info.get("size") or 0,
                 "kind": kind,
                 "annexkey": key,
                 "present": False,
@@ -479,8 +483,7 @@ class _Converter:
             return {}
 
         if linkonly:
-            self._count("link-only")
-            return self._link(self._register(path, relpath, "linkonly"))
+            return self._safe_link(path, relpath, "linkonly", "link-only")
 
         try:
             if ext in _NIFTI_EXT:
@@ -511,8 +514,26 @@ class _Converter:
             self.errors.append("%s: %s: %s" % (relpath, type(err).__name__, err))
             warnings.warn("failed to parse %s: %s" % (relpath, err))
 
-        self._count("link")
-        return self._link(self._register(path, relpath, "binary"))
+        return self._safe_link(path, relpath, "binary", "link")
+
+    def _safe_link(self, path, relpath, kind, counter):
+        """Register and link a file, tolerating an unreadable payload.
+
+        This is the last resort for every file the specific handlers could not
+        take, so it must not be able to raise: registering touches the payload
+        (to hash it), and a file that cannot be read -- wrong permissions, a
+        vanished network mount, a symlink loop -- would otherwise abort the
+        whole dataset from inside the fallback that exists to prevent exactly
+        that.
+        """
+        try:
+            entry = self._register(path, relpath, kind)
+        except OSError as err:
+            self.errors.append("%s: unreadable: %s" % (relpath, err))
+            self._count("unreadable")
+            return {"_DataLink_": "unreadable:%s" % relpath}
+        self._count(counter)
+        return self._link(entry)
 
     # -- format handlers ------------------------------------------------
 
