@@ -30,6 +30,7 @@ import numpy as np
 
 from jdata.njcas import CAS
 from jdata.njbids import (
+    ai_summary,
     FileInfo,
     NJBIDS_DEFAULT,
     bids2json,
@@ -1264,3 +1265,45 @@ class TestMixedIdentifierAlgorithms(unittest.TestCase):
             self.assertGreater(found, 1)
         finally:
             cas.close()
+
+
+class TestAISummary(unittest.TestCase):
+    """Pre-generated AI summaries merged into .neurojson at conversion time.
+
+    They are decoration, so anything missing, empty or malformed must leave the
+    document untouched rather than fail a conversion that is otherwise fine.
+    """
+
+    def _write(self, d, name, payload):
+        with open(os.path.join(d, name), "w", encoding="utf-8") as fid:
+            json.dump(payload, fid)
+
+    def test_reads_datainfo_wrapper(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._write(d, "ds000001.ai.json",
+                        {".datainfo": {"AISummary": "a summary",
+                                       "Citation.cff": {"title": "T"}}})
+            got = ai_summary(d, "ds000001")
+            self.assertEqual(got["AISummary"], "a summary")
+            self.assertEqual(got["Citation.cff"], {"title": "T"})
+
+    def test_accepts_a_bare_object_too(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._write(d, "ds1.ai.json", {"AISummary": "flat"})
+            self.assertEqual(ai_summary(d, "ds1")["AISummary"], "flat")
+
+    def test_empty_values_are_dropped(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._write(d, "ds1.ai.json",
+                        {".datainfo": {"AISummary": "", "Citation.cff": {}}})
+            self.assertIsNone(ai_summary(d, "ds1"))
+
+    def test_missing_or_broken_never_raises(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertIsNone(ai_summary(d, "nosuchdataset"))
+            with open(os.path.join(d, "bad.ai.json"), "w") as fid:
+                fid.write("{not json")
+            self.assertIsNone(ai_summary(d, "bad"))
+            self.assertIsNone(ai_summary(None, "ds1"))
+            self.assertIsNone(ai_summary(d, None))
+

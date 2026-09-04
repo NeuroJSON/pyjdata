@@ -1051,6 +1051,40 @@ def _load_description(dspath):
         return {}
 
 
+
+def ai_summary(aidir, dsname):
+    """Load a pre-generated AI summary for one dataset, or None.
+
+    The files are named ``<dsname>.ai.json`` and wrap their content in a
+    ``.datainfo`` key -- the metadata key this schema used before it became
+    ``.neurojson`` -- so the contents are lifted out of that wrapper rather
+    than nested one level deeper. Anything missing or unreadable is simply
+    absent from the document: a summary is decoration, and its absence must
+    never fail a conversion.
+    """
+    if not aidir or not dsname:
+        return None
+
+    path = os.path.join(aidir, "%s.ai.json" % dsname)
+
+    try:
+        with open(path, "r", encoding="utf-8") as fid:
+            payload = json.load(fid)
+    except (OSError, ValueError):
+        return None
+
+    inner = payload.get(".datainfo")
+
+    if not isinstance(inner, dict):
+        inner = payload if isinstance(payload, dict) else None
+
+    if not inner:
+        return None
+
+    # drop empty values rather than publishing blank fields
+    return {k: v for k, v in inner.items() if v not in (None, "", [], {})} or None
+
+
 def bids2json(dspath, dbname=None, dsname=None, cas=None, casroot=None, **kwargs):
     """Convert one BIDS dataset directory into version-invariant JSON documents.
 
@@ -1183,6 +1217,15 @@ def bids2json(dspath, dbname=None, dsname=None, cas=None, casroot=None, **kwargs
         doc[".neurojson"]["EncodeCodec"] = config.get("encode_codec") or "zlib"
     if version.get("DatasetDOI"):
         doc[".neurojson"]["DatasetDOI"] = version["DatasetDOI"]
+
+    # Pre-generated AI summaries live outside the dataset and are merged in
+    # here so they travel with the document. The publish handler passes
+    # everything under .neurojson through untouched apart from the timestamps,
+    # so this survives to CouchDB without a second write.
+    summary = ai_summary(config.get("ai_summary"), dsname)
+
+    if summary:
+        doc[".neurojson"].update(summary)
 
     return {
         "doc": doc,

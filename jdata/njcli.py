@@ -198,6 +198,9 @@ def cmd_convert(args):
     if args.encode:
         options["njbids"]["encode"] = tuple(args.encode)
         options["njbids"]["encode_codec"] = args.encode_codec
+
+    if getattr(args, "ai_summary", None):
+        options["njbids"]["ai_summary"] = args.ai_summary
         options["njbids"]["encode_threads"] = args.encode_threads
     if args.max_encode:
         options["njbids"]["max_encode"] = args.max_encode
@@ -892,6 +895,14 @@ def build_parser():
         "named <sha256>_<codec>.<bnii|bnirs|bgii|jdb>, instead of referencing "
         "the original file. Requires reading (and rewriting) every payload.",
     )
+    conv.add_argument(
+        "--ai-summary",
+        metavar="DIR",
+        help="directory of <dataset>.ai.json files whose .datainfo contents are "
+             "merged into the document's .neurojson metadata (AISummary and "
+             "Citation.cff). Missing or unreadable files are skipped silently.",
+    )
+
     conv.add_argument(
         "--encode-codec",
         default="zlib",
