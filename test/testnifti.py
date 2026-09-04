@@ -177,6 +177,65 @@ class Test_jnifti(unittest.TestCase):
         self.assertEqual(hdr["pixdim"].dtype.name, "float64")
 
 
+class TestNiftiExtensions(unittest.TestCase):
+    """A NIfTI carrying an extension record used to fail to parse at all.
+
+    Three separate defects stacked up in the extension block, and every one of
+    them was masked by the fact that most files have no extensions and so never
+    reach it:
+
+      * the header fields are 1-element numpy arrays, and using them raw as a
+        slice index raises TypeError;
+      * dataendian held "little"/"big" from sys.byteorder but was handed to
+        struct as a format prefix, where only "<" and ">" are valid;
+      * the same variable was compared against "L", which sys.byteorder never
+        returns, so nii["endian"] reported big-endian for every file ever read.
+    """
+
+    def _write_with_extension(self, path, endian="<"):
+        """A minimal NIfTI-1 with one 16-byte extension record."""
+        e = endian
+        hdr = bytearray(348)
+        hdr[0:4] = struct.pack(e + "i", 348)
+        hdr[40:42] = struct.pack(e + "h", 3)          # dim[0] = 3
+        hdr[42:48] = struct.pack(e + "3h", 2, 3, 4)   # 2x3x4
+        hdr[70:72] = struct.pack(e + "h", 16)         # datatype float32
+        hdr[72:74] = struct.pack(e + "h", 32)         # bitpix
+        hdr[76:80] = struct.pack(e + "f", 1.0)        # pixdim[0]
+        hdr[80:92] = struct.pack(e + "3f", 1.0, 1.0, 1.0)
+        voxoffset = 348 + 4 + 16
+        hdr[108:112] = struct.pack(e + "f", float(voxoffset))
+        hdr[344:348] = b"n+1\x00"
+        ext = struct.pack(e + "4B", 1, 0, 0, 0)       # extension flag
+        ext += struct.pack(e + "ii", 16, 4) + b"hello ext"[:8]
+        vol = np.arange(24, dtype=e + "f4").reshape(2, 3, 4, order="F")
+        with open(path, "wb") as fid:
+            fid.write(bytes(hdr) + ext + vol.tobytes(order="F"))
+
+    def test_extension_record_is_parsed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            f = os.path.join(tmp, "ext.nii")
+            self._write_with_extension(f)
+            nii = nii2jnii(f)                    # used to raise TypeError
+            self.assertIn("NIFTIExtension", nii)
+            self.assertEqual(len(nii["NIFTIExtension"]), 1)
+            self.assertEqual(nii["NIFTIExtension"][0]["Type"], 4)
+            self.assertEqual(
+                np.asarray(nii["NIFTIData"]).shape, (2, 3, 4)
+            )
+
+    def test_big_endian_extension_parses(self):
+        """Exercises the byte-order path: the struct prefix used to be the word
+        "little", which is not a valid format character."""
+        with tempfile.TemporaryDirectory() as tmp:
+            f = os.path.join(tmp, "be.nii")
+            self._write_with_extension(f, endian=">")
+            nii = nii2jnii(f)
+            self.assertEqual(len(nii["NIFTIExtension"]), 1)
+            self.assertEqual(nii["NIFTIExtension"][0]["Type"], 4)
+
+
+
 if __name__ == "__main__":
     unittest.main()
 

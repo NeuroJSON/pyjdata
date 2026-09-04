@@ -40,6 +40,18 @@ from typing import Union
 from collections import defaultdict
 
 
+
+def _hdrint(value):
+    """Return a NIfTI header field as a Python int.
+
+    Header fields arrive as 1-element numpy arrays. Used raw as a slice index
+    they raise "only integer scalar arrays can be converted to a scalar index",
+    and passing them to int() directly is deprecated for ndim > 0, so unwrap
+    explicitly.
+    """
+    return int(np.asarray(value).ravel()[0])
+
+
 def nii2jnii(filename, format="jnii", *varargin, **kwargs):
     hdrfile = filename
     isnii = -1
@@ -77,13 +89,18 @@ def nii2jnii(filename, format="jnii", *varargin, **kwargs):
             hdrbytes = finput.read()
         nii = {"hdr": memmapstream(hdrbytes, niftiheader)}
 
+    # the file's byte order, not the host's: a header that needs byteswapping to
+    # make sense was written on the opposite-endian machine, and the extension
+    # records later in this function have to be unpacked accordingly
     dataendian = sys.byteorder
+    otherendian = "big" if sys.byteorder == "little" else "little"
 
     if nii["hdr"]["sizeof_hdr"] not in [348, 540]:
         value = nii["hdr"]["sizeof_hdr"]
         if not isinstance(value, np.ndarray):
             value = np.array(value)
         nii["hdr"]["sizeof_hdr"] = value.byteswap()
+        dataendian = otherendian
 
     if nii["hdr"]["sizeof_hdr"] == 540:  # NIFTI-2 format
         niftiheader = niiformat("nifti2")
@@ -93,6 +110,7 @@ def nii2jnii(filename, format="jnii", *varargin, **kwargs):
             nii["hdr"] = memmapstream(hdrbytes, niftiheader)
 
     if nii["hdr"]["dim"][0] > 7:
+        dataendian = otherendian
         names = list(nii["hdr"].keys())
         for name in names:
             value = nii["hdr"][name]
@@ -157,7 +175,7 @@ def nii2jnii(filename, format="jnii", *varargin, **kwargs):
     nii["datatype"] = type2str[typeidx][0]
     nii["datalen"] = type2str[typeidx][1]
     nii["voxelbyte"] = type2byte[typeidx, 1]
-    nii["endian"] = "little" if dataendian == "L" else "big"
+    nii["endian"] = dataendian
 
     if type2byte[typeidx, 1] == 0:
         nii["img"] = []
@@ -189,7 +207,7 @@ def nii2jnii(filename, format="jnii", *varargin, **kwargs):
         if "gzdata" not in locals():
             with open(filename, "rb") as fid:
                 if isnii:
-                    fid.seek(int(nii["hdr"]["vox_offset"]))
+                    fid.seek(_hdrint(nii["hdr"]["vox_offset"]))
                 nii["img"] = np.frombuffer(fid.read(imgbytenum), dtype=nii["datatype"])
         else:
             # the slice used to run one byte past the payload, which leaves
@@ -239,12 +257,13 @@ def nii2jnii(filename, format="jnii", *varargin, **kwargs):
         if "gzdata" in locals():
             nii["NIFTIExtension"] = []
             count = 0
-            bufpos = nii0["hdr"]["sizeof_hdr"] + 4
-            while bufpos < nii0["hdr"]["vox_offset"]:
-                size = struct.unpack(dataendian + "I", gzdata[bufpos : bufpos + 4])[0] - 8
-                type = struct.unpack(dataendian + "I", gzdata[bufpos + 4 : bufpos + 8])[0]
+            bufpos = _hdrint(nii0["hdr"]["sizeof_hdr"]) + 4
+            voxoffset = _hdrint(nii0["hdr"]["vox_offset"])
+            while bufpos < voxoffset:
+                size = struct.unpack(("<" if dataendian == "little" else ">") + "I", gzdata[bufpos : bufpos + 4])[0] - 8
+                type = struct.unpack(("<" if dataendian == "little" else ">") + "I", gzdata[bufpos + 4 : bufpos + 8])[0]
                 bufpos += 8
-                if bufpos + size <= nii0["hdr"]["vox_offset"]:
+                if bufpos + size <= voxoffset:
                     nii["NIFTIExtension"].append(
                         {
                             "Size": size,
@@ -256,13 +275,17 @@ def nii2jnii(filename, format="jnii", *varargin, **kwargs):
                 count += 1
         else:
             with open(filename, "rb") as fid:
-                fid.seek(nii0["hdr"]["sizeof_hdr"] + 4)
+                fid.seek(_hdrint(nii0["hdr"]["sizeof_hdr"]) + 4)
                 nii["NIFTIExtension"] = []
                 count = 0
-                while fid.tell() < nii0["hdr"]["vox_offset"]:
-                    size = struct.unpack(dataendian + "I", fid.read(4))[0] - 8
-                    type = struct.unpack(dataendian + "I", fid.read(4))[0]
-                    if fid.tell() + size < nii0["hdr"]["vox_offset"]:
+                voxoffset = _hdrint(nii0["hdr"]["vox_offset"])
+                while fid.tell() < voxoffset:
+                    size = struct.unpack(("<" if dataendian == "little" else ">") + "I", fid.read(4))[0] - 8
+                    type = struct.unpack(("<" if dataendian == "little" else ">") + "I", fid.read(4))[0]
+                    # <=, matching the in-memory branch above: an extension
+                    # that ends exactly at vox_offset is valid and was silently
+                    # dropped here
+                    if fid.tell() + size <= voxoffset:
                         nii["NIFTIExtension"].append(
                             {
                                 "Size": size,
