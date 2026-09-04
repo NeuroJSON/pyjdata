@@ -264,7 +264,9 @@ def edfheader(filename):
         is_bdf = head[0:1] == b"\xff"
 
         def txt(start, length):
-            return head[start : start + length].decode("latin-1").strip()
+            # the spec says space-padded ASCII, but writers in the wild pad with
+            # NULs, which str.strip() leaves in place and int() then rejects
+            return head[start : start + length].decode("latin-1").strip("\x00 \t\r\n")
 
         version = txt(0, 8) if not is_bdf else head[1:8].decode("latin-1").strip()
         nsignals = int(txt(252, 4))
@@ -276,7 +278,7 @@ def edfheader(filename):
     def field(offset, width, count=nsignals):
         base = offset * nsignals
         return [
-            block[base + i * width : base + (i + 1) * width].decode("latin-1").strip()
+            block[base + i * width : base + (i + 1) * width].decode("latin-1").strip("\x00 \t\r\n")
             for i in range(count)
         ]
 

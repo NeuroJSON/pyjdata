@@ -44,6 +44,7 @@ from .njdigest import bvheader, edfheader
 
 __all__ = [
     "eeg2jeeg",
+    "jeeg2edf",
     "edf2jeeg",
     "bv2jeeg",
     "eeglab2jeeg",
@@ -102,8 +103,10 @@ def edf2jeeg(filename, maxsamples=None):
 
     meta = edfheader(filename)
     head = meta["EDFHeader"]
+    subtype, continuity = _edf_subtype(head)
 
     nsig = head["NumberOfSignals"]
+    source = _source_block(filename, subtype, 256 + 256 * nsig)
     perrec = head["SamplesPerRecord"]
     nrec = head["NumberOfDataRecords"]
     width = 3 if head["Format"] == "BDF" else 2
@@ -140,14 +143,195 @@ def edf2jeeg(filename, maxsamples=None):
     bounds = np.cumsum([0] + list(perrec))
     channels = [values[:, bounds[i] : bounds[i + 1]].reshape(-1) for i in range(nsig)]
 
-    uniform = len(set(perrec)) == 1
-    data = np.vstack(channels) if (uniform and nsig) else channels
+    # EDF+ hides its annotations in a signal named "EDF Annotations", whose
+    # "samples" are text, not measurements. Reading it as a data channel mixes
+    # TAL bytes into the sample matrix and loses the events entirely.
+    labels = head.get("Labels") or []
+    annot_idx = [
+        i
+        for i in range(nsig)
+        if str(labels[i] if i < len(labels) else "").strip()
+        in ("EDF Annotations", "BDF Annotations")
+    ]
+    signal_idx = [i for i in range(nsig) if i not in annot_idx]
 
-    return {
-        "EEGHeader": _edf_header(head, nrec),
-        "EEGChannels": _edf_channels(head),
+    events, starts = [], []
+
+    if annot_idx and nrec:
+        events, starts = _edf_annotations(
+            raw, bounds, perrec, recsamples, width, nrec, annot_idx
+        )
+
+    kept = [channels[i] for i in signal_idx]
+    kept_lengths = [perrec[i] for i in signal_idx]
+    uniform = len(set(kept_lengths)) == 1
+    data = np.vstack(kept) if (uniform and kept) else kept
+
+    allchan = _edf_channels(head)
+
+    for i, ch in enumerate(allchan):
+        ch["OriginalIndex"] = i
+
+    out = {
+        "EEGHeader": _edf_header(head, nrec, subtype, continuity, len(annot_idx)),
+        "EEGChannels": [allchan[i] for i in signal_idx],
         "EEGData": data,
+        "EEGSource": source,
     }
+
+    if events:
+        out["EEGEvents"] = events
+
+    # The annotation signal is kept verbatim as well as parsed. EEGEvents is
+    # what a reader wants; this is what a writer needs, because the samples of
+    # that channel are the file's own bytes and no parse of them round-trips.
+    if annot_idx:
+        out["EEGAnnotationData"] = {
+            "OriginalIndex": annot_idx,
+            "SamplesPerRecord": [perrec[i] for i in annot_idx],
+            "Data": np.vstack([channels[i] for i in annot_idx])
+            if len(set(perrec[i] for i in annot_idx)) == 1
+            else [channels[i] for i in annot_idx],
+        }
+
+    # EDF+D is not a continuous recording: the records carry their own start
+    # times and there are gaps between them, so a reader that assumes a uniform
+    # time axis gets it wrong
+    if continuity == "discontinuous" and starts:
+        out["EEGHeader"]["RecordStartTimes"] = starts
+
+    return out
+
+
+
+
+def _source_block(filename, fmt, headerbytes=0):
+    """What is needed to reconstruct, and to prove a reconstruction correct.
+
+    Encoding does not keep the original bytes in the content store, so the
+    wrapper is the only remaining description of the file. Two things make it
+    sufficient: the original header captured verbatim -- these formats write
+    fixed-width ASCII whose exact spelling ("1000" against "1.0E3") no parse
+    preserves -- and the size and digest of the whole file, so a rebuild can be
+    checked rather than assumed.
+    """
+    import hashlib
+
+    out = {
+        "Format": fmt,
+        "File": os.path.basename(filename),
+        "Bytes": os.path.getsize(filename),
+    }
+
+    digest = hashlib.sha256()
+
+    with open(filename, "rb") as fid:
+        if headerbytes:
+            raw = fid.read(headerbytes)
+            out["RawHeader"] = {"_ByteStream_": raw}
+            digest.update(raw)
+
+        for chunk in iter(lambda: fid.read(1 << 20), b""):
+            digest.update(chunk)
+
+    out["SHA256"] = digest.hexdigest()
+    return out
+
+
+def _edf_subtype(head):
+    """Tell EDF from EDF+ (and BDF from BDF+), and continuous from not.
+
+    The + variants are marked only in the 44-byte reserved field: "EDF+C" for
+    continuous, "EDF+D" for discontinuous. Plain BDF writes "24BIT" there and
+    plain EDF usually leaves it blank, so the base format still comes from the
+    version bytes.
+    """
+    base = head.get("Format") or "EDF"
+    reserved = (head.get("Reserved") or "").strip().upper()
+
+    if reserved.startswith(("EDF+", "BDF+")):
+        return base + "+", ("discontinuous" if reserved.endswith("D") else "continuous")
+
+    return base, "continuous"
+
+
+def _edf_annotations(raw, bounds, perrec, recsamples, width, nrec, annot_idx):
+    """Parse EDF+ TALs out of the annotation signal.
+
+    Each record holds one or more Time-stamped Annotation Lists:
+
+        +<onset>[\x15<duration>]\x14<text>[\x14<text>...]\x14\x00
+
+    The first TAL of a record carries an empty text and states that record's
+    start time, which is what makes EDF+D navigable.
+    """
+    events, starts = [], []
+    recbytes = recsamples * width
+
+    for r in range(nrec):
+        for i in annot_idx:
+            lo = r * recbytes + bounds[i] * width
+            hi = lo + perrec[i] * width
+            blob = bytes(raw[lo:hi])
+
+            for n, tal in enumerate(blob.split(b"\x00")):
+                if not tal.strip(b"\x00 \t"):
+                    continue
+
+                parsed = _parse_tal(tal)
+
+                if parsed is None:
+                    continue
+
+                onset, duration, texts = parsed
+
+                if n == 0 and not any(t for t in texts):
+                    starts.append(onset)   # the record-start TAL
+                    continue
+
+                for text in texts:
+                    if not text:
+                        continue
+
+                    entry = {"Onset": onset, "Annotation": text}
+
+                    if duration is not None:
+                        entry["Duration"] = duration
+
+                    events.append(entry)
+
+    return events, starts
+
+
+def _parse_tal(tal):
+    """One TAL: onset, optional duration, then one or more \x14-joined texts."""
+    try:
+        body = tal.decode("utf-8", "replace")
+    except Exception:
+        return None
+
+    parts = body.split("\x14")
+
+    if not parts or not parts[0]:
+        return None
+
+    stamp = parts[0]
+    duration = None
+
+    if "\x15" in stamp:
+        stamp, _, dur = stamp.partition("\x15")
+
+        try:
+            duration = float(dur)
+        except ValueError:
+            duration = None
+
+    try:
+        onset = float(stamp)
+    except ValueError:
+        return None
+
+    return onset, duration, [p.strip("\x00").strip() for p in parts[1:]]
 
 
 def _decode_fixed_width(raw, width):
@@ -164,19 +348,36 @@ def _decode_fixed_width(raw, width):
     return np.where(out >= (1 << 23), out - (1 << 24), out).astype(np.int32)
 
 
-def _edf_header(head, nrec):
-    keep = (
-        "Format",
-        "Version",
-        "PatientID",
-        "RecordingID",
-        "StartDate",
-        "StartTime",
-        "Reserved",
-        "DurationOfDataRecord",
-        "NumberOfSignals",
+def _edf_header(head, nrec, subtype=None, continuity=None, nannot=0):
+    # every field the header parser produced, minus the per-signal lists that
+    # are reported per channel in EEGChannels instead. Dropping anything else
+    # would make the original file unreconstructable.
+    perchannel = (
+        "Labels",
+        "TransducerType",
+        "PhysicalDimension",
+        "PhysicalMinimum",
+        "PhysicalMaximum",
+        "DigitalMinimum",
+        "DigitalMaximum",
+        "PreFiltering",
+        "SamplesPerRecord",
+        "SamplingFrequency",
     )
-    out = {k: head[k] for k in keep if k in head}
+    out = {k: v for k, v in head.items() if k not in perchannel}
+
+    if subtype:
+        out["Format"] = subtype
+
+    if continuity:
+        out["Continuity"] = continuity
+
+    # NumberOfSignals in the file counts the annotation channel; the document
+    # should describe the channels it actually carries
+    if nannot:
+        out["NumberOfSignals"] = max(0, int(head.get("NumberOfSignals") or 0) - nannot)
+        out["NumberOfAnnotationSignals"] = nannot
+
     out["NumberOfDataRecords"] = nrec
     out["RecordingDuration"] = (
         nrec * head["DurationOfDataRecord"] if head.get("DurationOfDataRecord") else None
@@ -300,6 +501,10 @@ def bv2jeeg(filename, maxsamples=None):
         },
         "EEGChannels": _bv_channels(chaninfo, nchan, srate),
         "EEGData": np.ascontiguousarray(data),
+        # the .vhdr is small ASCII, so it is kept whole rather than described;
+        # with it plus BinaryFormat and DataOrientation the pair is rebuildable
+        "EEGSource": _source_block(filename, "BrainVision", os.path.getsize(filename)),
+        "EEGSourceBinary": _source_block(binpath, "BrainVision-binary"),
     }
 
 
@@ -431,6 +636,7 @@ def eeglab2jeeg(filename, maxsamples=None):
 
     labels = _eeglab_labels(get("chanlocs"), nchan)
     nsamp = int(samples.shape[1]) if getattr(samples, "ndim", 0) == 2 else None
+    fdtsource = _source_block(fdt, "EEGLAB-fdt") if external else None
 
     return {
         "EEGHeader": {
@@ -456,6 +662,8 @@ def eeglab2jeeg(filename, maxsamples=None):
             for i in range(nchan or 0)
         ],
         "EEGData": samples,
+        "EEGSource": _source_block(filename, "EEGLAB"),
+        **({"EEGSourceBinary": fdtsource} if fdtsource else {}),
     }
 
 
@@ -513,3 +721,67 @@ def _text(value):
         return str(flat[0]) if flat.size else ""
     except Exception:
         return str(value)
+
+
+# =============================================================================
+# reconstruction
+# =============================================================================
+
+
+def jeeg2edf(jeeg, filename):
+    """Write an EDF/EDF+/BDF back out from its JEEG structure.
+
+    Uses ``EEGSource.RawHeader`` verbatim, so the header is reproduced exactly
+    rather than re-derived from parsed fields whose spelling was never
+    preserved.  The data section is rebuilt by re-interleaving the channels
+    into records, annotation channels included at their original positions.
+
+    Returns the SHA-256 of what was written, which
+    ``EEGSource.SHA256`` can be checked against.
+    """
+    import hashlib
+
+    source = jeeg.get("EEGSource") or {}
+    rawhdr = (source.get("RawHeader") or {}).get("_ByteStream_")
+
+    if not rawhdr:
+        raise ValueError("this JEEG has no EEGSource.RawHeader; cannot rebuild exactly")
+
+    head = jeeg["EEGHeader"]
+    width = 3 if str(head.get("Format", "")).startswith("BDF") else 2
+    nrec = int(head["NumberOfDataRecords"])
+
+    # put every channel back at its original index
+    slots = {}
+
+    for ch, row in zip(jeeg.get("EEGChannels") or [], np.atleast_2d(jeeg["EEGData"])):
+        slots[int(ch["OriginalIndex"])] = (np.asarray(row), int(ch["SamplesPerRecord"]))
+
+    annot = jeeg.get("EEGAnnotationData")
+
+    if annot:
+        rows = np.atleast_2d(annot["Data"])
+
+        for idx, per, row in zip(annot["OriginalIndex"], annot["SamplesPerRecord"], rows):
+            slots[int(idx)] = (np.asarray(row), int(per))
+
+    order = sorted(slots)
+    body = bytearray()
+
+    for r in range(nrec):
+        for i in order:
+            row, per = slots[i]
+            chunk = row[r * per : (r + 1) * per].astype(np.int64)
+
+            if width == 2:
+                body += chunk.astype("<i2").tobytes()
+            else:
+                for v in chunk:
+                    body += (int(v) & 0xFFFFFF).to_bytes(3, "little")
+
+    payload = bytes(rawhdr) + bytes(body)
+
+    with open(filename, "wb") as fid:
+        fid.write(payload)
+
+    return hashlib.sha256(payload).hexdigest()

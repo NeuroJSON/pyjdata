@@ -19,7 +19,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from jdata.jeeg import bv2jeeg, edf2jeeg, eeg2jeeg
+from jdata.jeeg import bv2jeeg, edf2jeeg, eeg2jeeg, jeeg2edf
 
 
 def write_edf(path, nsig=2, nrec=3, persig=4, srate_dur=1.0, bdf=False, signals=None):
@@ -262,3 +262,95 @@ class TestJDataRoundTrip(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestVariantAndRoundTrip(unittest.TestCase):
+    """EDF, EDF+C, EDF+D and BDF must be told apart, and rebuilt exactly.
+
+    Encoding does not keep the original bytes in the content store, so the
+    wrapper is the only surviving description of the file. If it cannot
+    reproduce the file it has silently lost data.
+    """
+
+    def _with_reserved(self, path, reserved, **kw):
+        expect = write_edf(path, **kw)
+
+        with open(path, "r+b") as fid:
+            fid.seek(192)
+            fid.write(("%-44s" % reserved).encode("latin-1"))
+
+        return expect
+
+    def test_plain_edf(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "a.edf")
+            write_edf(p)
+            h = edf2jeeg(p)["EEGHeader"]
+            self.assertEqual(h["Format"], "EDF")
+            self.assertEqual(h["Continuity"], "continuous")
+
+    def test_edf_plus_continuous_and_discontinuous(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for reserved, expect in (("EDF+C", "continuous"), ("EDF+D", "discontinuous")):
+                p = os.path.join(tmp, "%s.edf" % reserved)
+                self._with_reserved(p, reserved)
+                h = edf2jeeg(p)["EEGHeader"]
+                self.assertEqual(h["Format"], "EDF+", reserved)
+                self.assertEqual(h["Continuity"], expect, reserved)
+
+    def test_bdf_is_not_reported_as_edf(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "a.bdf")
+            write_edf(p, bdf=True)
+            self.assertEqual(edf2jeeg(p)["EEGHeader"]["Format"], "BDF")
+
+    def test_source_block_records_the_original(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "a.edf")
+            write_edf(p, nsig=2)
+            src = edf2jeeg(p)["EEGSource"]
+            self.assertEqual(src["Bytes"], os.path.getsize(p))
+            self.assertEqual(src["File"], "a.edf")
+            self.assertEqual(len(src["SHA256"]), 64)
+            # the header is kept verbatim: 256 + 256 per signal
+            self.assertEqual(len(src["RawHeader"]["_ByteStream_"]), 256 + 256 * 2)
+
+    def test_round_trip_is_byte_exact(self):
+        import hashlib
+
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, kw in (
+                ("edf", {}),
+                ("bdf", {"bdf": True}),
+                ("wide", {"nsig": 5, "nrec": 7, "persig": 3}),
+            ):
+                p = os.path.join(tmp, name + ".edf")
+                write_edf(p, **kw)
+                jeeg = edf2jeeg(p)
+                out = os.path.join(tmp, name + ".rebuilt")
+                digest = jeeg2edf(jeeg, out)
+                with open(p, "rb") as fid:
+                    original = hashlib.sha256(fid.read()).hexdigest()
+                self.assertEqual(digest, original, name)
+                self.assertEqual(digest, jeeg["EEGSource"]["SHA256"], name)
+                with open(p, "rb") as a, open(out, "rb") as b:
+                    self.assertEqual(a.read(), b.read(), name)
+
+    def test_rebuild_refuses_without_the_raw_header(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "a.edf")
+            write_edf(p)
+            jeeg = edf2jeeg(p)
+            jeeg["EEGSource"].pop("RawHeader")
+
+            with self.assertRaises(ValueError):
+                jeeg2edf(jeeg, os.path.join(tmp, "out.edf"))
+
+    def test_channels_keep_their_original_index(self):
+        """Needed to put annotation channels back where they were."""
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "a.edf")
+            write_edf(p, nsig=3)
+            ch = edf2jeeg(p)["EEGChannels"]
+            self.assertEqual([c["OriginalIndex"] for c in ch], [0, 1, 2])
+
