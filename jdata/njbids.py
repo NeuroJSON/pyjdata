@@ -813,7 +813,58 @@ class _Converter:
         self._count("snirf")
         return digest
 
+    def _jeeg(self, path, relpath, size, kind, ext, fallback):
+        """Encode an electrophysiology recording as a JEEG attachment.
+
+        The header and per-channel calibration stay inline so the document
+        remains searchable; only EEGData becomes the attachment. If the reader
+        cannot handle the file -- an EyeLink recording wearing a .edf
+        extension, a BrainVision header whose binary was never fetched -- the
+        caller's digest path is used instead, because a referenced file is a
+        worse outcome than a failed conversion but a far better one than a
+        dataset that will not convert at all.
+        """
+        if "eeg" not in self.config.get("encode", ()):
+            return fallback()
+
+        from .jeeg import eeg2jeeg
+
+        entry = self._register(path, relpath, kind, info=self._info)
+
+        try:
+            jeeg = eeg2jeeg(path)
+        except Exception as err:
+            self.errors.append("%s: could not read as JEEG: %s" % (relpath, err))
+            self._count("eeg-readfail")
+            return fallback()
+
+        attached = self._attachment_link(
+            path, relpath, kind, ext, self._info, jsonpath="EEGData"
+        )
+
+        if attached is None:
+            self._count("eeg-encodefail")
+            return fallback()
+
+        header = {k: v for k, v in jeeg.items() if k != "EEGData"}
+        header["EEGData"] = attached
+        self._count("eeg-encoded")
+        return header
+
     def _eeglab(self, path, relpath, size):
+        from .njdigest import eeglab_digest
+
+        encoded = self._jeeg(
+            path, relpath, size, "eeglab", ".set",
+            lambda: self._eeglab_digest(path, relpath, size),
+        )
+
+        if encoded is not None:
+            return encoded
+
+        return self._eeglab_digest(path, relpath, size)
+
+    def _eeglab_digest(self, path, relpath, size):
         from .njdigest import eeglab_digest
 
         entry = self._register(path, relpath, "eeglab", info=self._info)
@@ -864,6 +915,20 @@ class _Converter:
         return digest
 
     def _brainvision(self, path, relpath, size):
+        # only the .vhdr carries a readable structure; the .vmrk is markers and
+        # the samples live in the .eeg the header names
+        if fileext(relpath) == ".vhdr":
+            encoded = self._jeeg(
+                path, relpath, size, "brainvision", ".vhdr",
+                lambda: self._brainvision_digest(path, relpath, size),
+            )
+
+            if encoded is not None:
+                return encoded
+
+        return self._brainvision_digest(path, relpath, size)
+
+    def _brainvision_digest(self, path, relpath, size):
         from .njdigest import bvheader
 
         self._register(path, relpath, "brainvision", store=False, info=self._info)
@@ -871,6 +936,17 @@ class _Converter:
         return bvheader(path)
 
     def _edf(self, path, relpath, size):
+        encoded = self._jeeg(
+            path, relpath, size, "edf", fileext(relpath),
+            lambda: self._edf_digest(path, relpath, size),
+        )
+
+        if encoded is not None:
+            return encoded
+
+        return self._edf_digest(path, relpath, size)
+
+    def _edf_digest(self, path, relpath, size):
         from .njdigest import edfheader
 
         entry = self._register(path, relpath, "edf", info=self._info)

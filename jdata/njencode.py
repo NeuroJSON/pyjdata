@@ -52,7 +52,13 @@ ENCODABLE = {
     ".gii": (".bgii", ("GIFTIData",)),
     ".jmsh": (".bmsh", ()),
     ".mat": (".jdb", ()),
-    ".set": (".jdb", ()),
+    # electrophysiology: header and per-channel calibration stay inline, the
+    # sample array is the bulk payload. .set was previously read by the generic
+    # MAT loader, which cannot follow the .fdt companion that holds the samples.
+    ".set": (".jeeg", ("EEGData",)),
+    ".edf": (".jeeg", ("EEGData",)),
+    ".bdf": (".jeeg", ("EEGData",)),
+    ".vhdr": (".jeeg", ("EEGData",)),
 }
 
 
@@ -126,7 +132,11 @@ def _load(path, ext, **kwargs):
         from .jfile import loadjson
 
         return loadjson(path)
-    if ext in (".mat", ".set"):
+    if ext in (".edf", ".bdf", ".vhdr", ".set"):
+        from .jeeg import eeg2jeeg
+
+        return eeg2jeeg(path)
+    if ext == ".mat":
         return _load_mat(path)
     raise ValueError("no loader for %r" % ext)
 

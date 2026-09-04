@@ -890,9 +890,9 @@ def build_parser():
     conv.add_argument(
         "--encode",
         nargs="*",
-        choices=["nii", "snirf", "gii", "mat"],
+        choices=["nii", "snirf", "gii", "mat", "eeg"],
         help="re-encode these modality payloads into binary JData attachments "
-        "named <sha256>_<codec>.<bnii|bnirs|bgii|jdb>, instead of referencing "
+        "named <sha256>_<codec>.<bnii|bnirs|bgii|jdb|jeeg>, instead of referencing "
         "the original file. Requires reading (and rewriting) every payload.",
     )
     conv.add_argument(
