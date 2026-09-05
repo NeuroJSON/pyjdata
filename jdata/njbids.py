@@ -1016,10 +1016,39 @@ def _walk(root, skip_hidden=True):
         for entry in sorted(files, key=lambda e: e.name):
             out.append(_info(entry, root))
         for entry in sorted(dirs, key=lambda e: e.name):
+            # CTF (.ds) and MEF3 (.mefd) recordings are directories. Descending
+            # into them would scatter one recording across hundreds of entries
+            # -- a single .mefd holds three files per channel -- so they are
+            # emitted as one unit and handed to the container encoders whole.
+            if os.path.splitext(entry.name)[1].lower() in _CONTAINER_DIR_EXT:
+                out.append(_container_info(entry, root))
+                continue
             visit(entry.path)
 
     visit(root)
     return out
+
+
+#: directory suffixes that name a single recording rather than a folder
+_CONTAINER_DIR_EXT = frozenset((".ds", ".mefd"))
+
+
+def _container_info(entry, root):
+    """A directory-shaped recording, sized by the sum of its members."""
+    relpath = os.path.relpath(entry.path, root).replace(os.sep, "/")
+    size = 0
+    present = False
+    for dirpath, dirnames, filenames in os.walk(entry.path):
+        dirnames.sort()
+        for name in sorted(filenames):
+            try:
+                size += os.stat(os.path.join(dirpath, name)).st_size
+                present = True
+            except OSError:
+                # an unfetched git-annex member leaves a dangling symlink; the
+                # container is still listed, just not encodable
+                pass
+    return FileInfo(entry.path, relpath, False, present, size, None)
 
 
 def _info(entry, root):

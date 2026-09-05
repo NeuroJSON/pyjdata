@@ -59,7 +59,45 @@ ENCODABLE = {
     ".edf": (".jeeg", ("EEGData",)),
     ".bdf": (".jeeg", ("EEGData",)),
     ".vhdr": (".jeeg", ("EEGData",)),
+    # MEG/iEEG recordings that are directories rather than files. CTF and MEF3
+    # name their parts with the filesystem, so the container *is* the tree.
+    ".fif": (".jfif", ("FIFFData",)),
+    ".ds": (".jmeg", ("CTFData",)),
+    ".mefd": (".jmef", ("MEF3Data",)),
 }
+
+#: source extensions that name a directory, not a file
+CONTAINER_EXT = frozenset((".ds", ".mefd"))
+
+
+def container_digest(path, algo="sha256"):
+    """A stable content hash for a directory-shaped recording.
+
+    ``.ds`` and ``.mefd`` are directories, so the file digest the CAS uses to
+    name an attachment does not apply. Hashing the sorted list of member
+    ``relpath`` and member digest gives the same properties: deterministic,
+    independent of mtime, path and host, and changing if any byte of any member
+    changes -- so two conversions of the same recording still agree, which is
+    what makes the output DOI-capable.
+    """
+    import hashlib
+
+    members = []
+    for root, dirs, files in os.walk(path):
+        dirs.sort()
+        for name in sorted(files):
+            full = os.path.join(root, name)
+            rel = os.path.relpath(full, path).replace(os.sep, "/")
+            h = hashlib.new(algo)
+            with open(full, "rb") as fid:
+                for chunk in iter(lambda: fid.read(1 << 20), b""):
+                    h.update(chunk)
+            members.append((rel, h.hexdigest()))
+
+    top = hashlib.new(algo)
+    for rel, digest in members:
+        top.update(("%s %s\n" % (rel, digest)).encode("utf-8"))
+    return top.hexdigest(), len(members)
 
 
 def encoder_for(ext):
@@ -136,6 +174,18 @@ def _load(path, ext, **kwargs):
         from .jeeg import eeg2jeeg
 
         return eeg2jeeg(path)
+    if ext == ".fif":
+        from .jfiff import fiff2jfiff
+
+        return fiff2jfiff(path)
+    if ext == ".ds":
+        from .jctf import ctf2jctf
+
+        return ctf2jctf(path)
+    if ext == ".mefd":
+        from .jmef3 import mef32jmef3
+
+        return mef32jmef3(path)
     if ext == ".mat":
         return _load_mat(path)
     raise ValueError("no loader for %r" % ext)
