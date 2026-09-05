@@ -93,6 +93,12 @@ _allownumpy = (
 ##====================================================================================
 
 
+#: threads used to inflate an indexed payload when the caller asks for nothing.
+#: Deliberately modest: the pipeline already runs many datasets concurrently,
+#: and most of the available speedup arrives by four threads.
+DEFAULT_DECODE_THREADS = min(4, os.cpu_count() or 1)
+
+
 def _decompress_data(blob, codec, opt=None, offsets=None):
     """Decompress a JData ``_ArrayZipData_`` payload.
 
@@ -102,7 +108,17 @@ def _decompress_data(blob, codec, opt=None, offsets=None):
     inflate, since the payload is a perfectly ordinary stream either way.
     """
     opt = opt or {}
-    nthread = int(opt.get("nthread", 1) or 1)
+    # Decoding differs from encoding in one decisive way: inflating an indexed
+    # stream in parallel yields bit-identical output, whereas *encoding*
+    # block-wise produces different bytes from a single stream. So threading
+    # has to stay opt-in when writing, to keep stored payloads reproducible,
+    # but there is nothing to preserve when reading -- only speed to gain.
+    # The parallel path is reached only by payloads that already carry an
+    # index and span more than one block, so small arrays are unaffected.
+    nthread = opt.get("nthread")
+    if nthread is None:
+        nthread = DEFAULT_DECODE_THREADS
+    nthread = int(nthread or 1)
     blob = bytes(blob)
 
     if codec in ("zlib", "gzip"):

@@ -446,5 +446,58 @@ class TestCompressLevel(unittest.TestCase):
         self.assertEqual(bytes(a), bytes(b))
 
 
+
+class TestDecodeThreadDefault(unittest.TestCase):
+    """Reading may parallelise by default; writing may not.
+
+    Inflating an indexed stream concurrently is bit-identical to inflating it
+    serially, so there is nothing to preserve. Deflating block-wise, by
+    contrast, produces different bytes from a single stream, which is why
+    nthread stays opt-in on the encode side.
+    """
+
+    def setUp(self):
+        rng = np.random.default_rng(11)
+        base = rng.integers(-500, 500, size=1 << 21, dtype=np.int32)
+        self.obj = {"x": np.repeat(base, 3)}
+
+    def test_default_is_at_least_one(self):
+        from jdata.jdata import DEFAULT_DECODE_THREADS
+
+        self.assertGreaterEqual(DEFAULT_DECODE_THREADS, 1)
+
+    def test_decode_default_matches_serial(self):
+        enc = jd.encode(self.obj, compression="zlib", compressarraysize=0, nthread=8)
+        self.assertIn("_ArrayZipOffsets_", enc["x"])
+        auto = jd.decode(enc)["x"]
+        serial = jd.decode(enc, nthread=1)["x"]
+        self.assertTrue(np.array_equal(auto, serial))
+        self.assertTrue(np.array_equal(auto, self.obj["x"]))
+
+    def test_decode_thread_count_never_changes_output(self):
+        enc = jd.encode(self.obj, compression="zlib", compressarraysize=0, nthread=8)
+        want = self.obj["x"]
+        for nt in (1, 2, 4, 16):
+            self.assertTrue(np.array_equal(jd.decode(enc, nthread=nt)["x"], want), nt)
+
+    def test_encode_default_stays_single_stream(self):
+        """A changed encode default would move every stored byte."""
+        single = jd.encode(self.obj, compression="zlib", compressarraysize=0)["x"][
+            "_ArrayZipData_"
+        ]
+        blocked = jd.encode(self.obj, compression="zlib", compressarraysize=0, nthread=1)[
+            "x"
+        ]["_ArrayZipData_"]
+        self.assertNotEqual(bytes(single), bytes(blocked))
+        self.assertNotIn(
+            "_ArrayZipOffsets_",
+            jd.encode(self.obj, compression="zlib", compressarraysize=0)["x"],
+        )
+
+    def test_unindexed_payload_still_decodes(self):
+        enc = jd.encode(self.obj, compression="zlib", compressarraysize=0)
+        self.assertTrue(np.array_equal(jd.decode(enc)["x"], self.obj["x"]))
+
+
 if __name__ == "__main__":
     unittest.main()

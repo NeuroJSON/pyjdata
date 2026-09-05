@@ -201,7 +201,9 @@ def cmd_convert(args):
 
     if getattr(args, "ai_summary", None):
         options["njbids"]["ai_summary"] = args.ai_summary
-        options["njbids"]["encode_threads"] = args.encode_threads
+    # not conditional on --ai-summary: nesting it there silently pinned every
+    # other run to one thread whatever --encode-threads said
+    options["njbids"]["encode_threads"] = args.encode_threads
     if args.max_encode:
         options["njbids"]["max_encode"] = args.max_encode
     if args.no_split:
