@@ -368,10 +368,15 @@ class TestMEF3(TempCase):
 
 
 class TestDispatch(TempCase):
+    def test_attachment_names_are_binary_spellings(self):
+        """Payloads are BJData, so the suffix must be b*, not j*."""
+        for ext in (".ds", ".mefd", ".fif", ".edf", ".bdf", ".vhdr", ".set"):
+            self.assertTrue(encoder_for(ext)[0].startswith(".b"), ext)
+
     def test_encodable_entries(self):
-        self.assertEqual(encoder_for(".ds"), (".jmeg", ("CTFData",)))
-        self.assertEqual(encoder_for(".mefd"), (".jmef", ("MEF3Data",)))
-        self.assertEqual(encoder_for(".fif"), (".jfif", ("FIFFData",)))
+        self.assertEqual(encoder_for(".ds"), (".bmeg", ("CTFData",)))
+        self.assertEqual(encoder_for(".mefd"), (".bmef", ("MEF3Data",)))
+        self.assertEqual(encoder_for(".fif"), (".bfif", ("FIFFData",)))
 
     def test_container_ext(self):
         self.assertEqual(sorted(CONTAINER_EXT), [".ds", ".mefd"])

@@ -42,6 +42,10 @@ __all__ = [
 ]
 
 #: source extension -> (attachment extension, bulk keys to move out)
+# Attachment extensions are the *binary* JData spellings: every payload here is
+# serialised with dumpb (BJData), and NeuroJSON names binary forms b* against
+# the text j* -- .bnii/.jnii, .bmsh/.jmsh, .bnirs/.jnirs. A j* name on a
+# binary payload mislabels the file to every reader that dispatches on suffix.
 ENCODABLE = {
     ".nii": (".bnii", ("NIFTIData", "NIFTIExtension")),
     ".nii.gz": (".bnii", ("NIFTIData", "NIFTIExtension")),
@@ -55,15 +59,15 @@ ENCODABLE = {
     # electrophysiology: header and per-channel calibration stay inline, the
     # sample array is the bulk payload. .set was previously read by the generic
     # MAT loader, which cannot follow the .fdt companion that holds the samples.
-    ".set": (".jeeg", ("EEGData",)),
-    ".edf": (".jeeg", ("EEGData",)),
-    ".bdf": (".jeeg", ("EEGData",)),
-    ".vhdr": (".jeeg", ("EEGData",)),
+    ".set": (".beeg", ("EEGData",)),
+    ".edf": (".beeg", ("EEGData",)),
+    ".bdf": (".beeg", ("EEGData",)),
+    ".vhdr": (".beeg", ("EEGData",)),
     # MEG/iEEG recordings that are directories rather than files. CTF and MEF3
     # name their parts with the filesystem, so the container *is* the tree.
-    ".fif": (".jfif", ("FIFFData",)),
-    ".ds": (".jmeg", ("CTFData",)),
-    ".mefd": (".jmef", ("MEF3Data",)),
+    ".fif": (".bfif", ("FIFFData",)),
+    ".ds": (".bmeg", ("CTFData",)),
+    ".mefd": (".bmef", ("MEF3Data",)),
 }
 
 #: source extensions that name a directory, not a file
