@@ -224,8 +224,16 @@ class TestCTF(TempCase):
         ds, _ = self.build()
         info = ctfinfo(ds)
         self.assertEqual(info["Format"], "CTF")
-        self.assertEqual(info["NumberOfChannels"], 4)
+        self.assertEqual(info["NumberOfTrials"], 3)
         self.assertEqual(info["SplitParts"], 1)
+
+    def test_info_omits_phi_and_sidecar_fields(self):
+        from jdata.njencode import PHI_KEYS, SIDECAR_KEYS
+
+        ds, _ = self.build()
+        info = ctfinfo(ds)
+        self.assertFalse([k for k in info if k in PHI_KEYS])
+        self.assertFalse([k for k in info if k in SIDECAR_KEYS])
 
     def test_rejects_bad_magic(self):
         ds, _ = self.build()
@@ -364,8 +372,14 @@ class TestMEF3(TempCase):
         info = mef3info(mefd)
         self.assertEqual(info["Format"], "MEF3")
         self.assertEqual(info["MEFVersion"], "3.0")
-        self.assertEqual(info["NumberOfChannels"], 2)
-        self.assertEqual(info["SamplingFrequency"], 512.0)
+        self.assertEqual(info["Compression"], "RED")
+
+    def test_info_omits_phi_and_sidecar_fields(self):
+        from jdata.njencode import PHI_KEYS, SIDECAR_KEYS
+
+        info = mef3info(self.build())
+        self.assertFalse([k for k in info if k in PHI_KEYS])
+        self.assertFalse([k for k in info if k in SIDECAR_KEYS])
 
 
 class TestDispatch(TempCase):
@@ -416,6 +430,113 @@ class TestDispatch(TempCase):
         entry = [f for f in _walk(self.tmp) if f.relpath.endswith(".ds")][0]
         self.assertEqual(entry.size, want)
         self.assertTrue(entry.present)
+
+
+
+class TestInlinePolicy(TempCase):
+    """What may sit beside _DataLink_: vetted, no PHI, no sidecar duplicates."""
+
+    def test_scrub_drops_phi(self):
+        from jdata.njencode import scrub_inline
+
+        got = scrub_inline({"Format": "EDF", "PatientID": "smith^john", "StartDate": "01.02.03"})
+        self.assertEqual(got, {"Format": "EDF"})
+
+    def test_scrub_drops_sidecar_duplicates(self):
+        from jdata.njencode import scrub_inline
+
+        got = scrub_inline({"Format": "CTF", "SamplingFrequency": 1200.0, "TaskName": "rest"})
+        self.assertEqual(got, {"Format": "CTF"})
+
+    def test_scrub_drops_nones(self):
+        from jdata.njencode import scrub_inline
+
+        self.assertEqual(scrub_inline({"a": None, "b": 1}), {"b": 1})
+
+    def test_unknown_extension_gets_no_inline_metadata(self):
+        from jdata.njencode import inline_info
+
+        path = os.path.join(self.tmp, "x.bin")
+        with open(path, "wb") as fid:
+            fid.write(b"\x00" * 16)
+        self.assertEqual(inline_info(path, ".bin"), {})
+
+    def test_unreadable_file_does_not_raise(self):
+        from jdata.njencode import inline_info
+
+        path = os.path.join(self.tmp, "truncated.edf")
+        with open(path, "wb") as fid:
+            fid.write(b"0" * 8)
+        self.assertEqual(inline_info(path, ".edf"), {})
+
+    def test_container_info_passes_the_policy(self):
+        from jdata.njencode import inline_info, PHI_KEYS, SIDECAR_KEYS
+
+        ds = os.path.join(self.tmp, "sub-01_task-x_meg.ds")
+        write_ctf(ds)
+        info = inline_info(ds, ".ds")
+        self.assertEqual(info["Format"], "CTF")
+        self.assertFalse([k for k in info if k in PHI_KEYS or k in SIDECAR_KEYS])
+
+
+class TestPipelineHandlers(TempCase):
+    """.ds, .mefd and .fif reach the encoders instead of failing as unreadable."""
+
+    def _convert(self, **kw):
+        import json as _json
+        from jdata.njbids import bids2json
+        from jdata.njcas import CAS
+
+        ds = os.path.join(self.tmp, "dsTEST")
+        os.makedirs(os.path.join(ds, "sub-01", "meg"), exist_ok=True)
+        with open(os.path.join(ds, "dataset_description.json"), "w") as fid:
+            _json.dump({"Name": "t", "BIDSVersion": "1.8.0"}, fid)
+        write_ctf(os.path.join(ds, "sub-01", "meg", "sub-01_task-a_meg.ds"))
+        write_mef3(os.path.join(ds, "sub-01", "meg", "sub-01_task-b_ieeg.mefd"))
+        write_fiff(os.path.join(ds, "sub-01", "meg", "sub-01_task-c_meg.fif"),
+                   ntag=6, bulkbytes=70000)
+        cas = CAS(os.path.join(self.tmp, "cas"), commit_every=1)
+        try:
+            return bids2json(ds, dbname="db", dsname="dsTEST", cas=cas, **kw)
+        finally:
+            cas.close()
+
+    def test_all_three_encode(self):
+        res = self._convert(encode=("ctf", "mef3", "fiff"))
+        counts = res["stats"]["counts"]
+        for k in ("ctf-encoded", "mef3-encoded", "fiff-encoded"):
+            self.assertEqual(counts.get(k), 1, k)
+        self.assertEqual(res["errors"], [])
+
+    def test_node_is_link_plus_metadata(self):
+        res = self._convert(encode=("ctf",))
+        node = res["doc"]["sub-01"]["meg"]["sub-01_task-a_meg.ds"]
+        self.assertIn("_DataLink_", node)
+        self.assertEqual(node["Format"], "CTF")
+        self.assertNotIn("CTFData", node)
+
+    def test_no_phi_reaches_the_document(self):
+        import json as _json
+        from jdata.njencode import PHI_KEYS
+
+        res = self._convert(encode=("ctf", "mef3", "fiff"))
+        blob = _json.dumps(res["doc"], default=str)
+        self.assertFalse([k for k in PHI_KEYS if '"%s"' % k in blob])
+
+    def test_without_encode_they_are_linked_not_unreadable(self):
+        res = self._convert(encode=())
+        node = res["doc"]["sub-01"]["meg"]["sub-01_task-a_meg.ds"]
+        self.assertIn("_DataLink_", node)
+        self.assertNotIn("unreadable", str(node["_DataLink_"]))
+
+    def test_container_digest_names_the_attachment(self):
+        from jdata.njencode import container_digest
+
+        res = self._convert(encode=("ctf",))
+        ds = os.path.join(self.tmp, "dsTEST", "sub-01", "meg", "sub-01_task-a_meg.ds")
+        want, _n = container_digest(ds)
+        node = res["doc"]["sub-01"]["meg"]["sub-01_task-a_meg.ds"]
+        self.assertIn(want, node["_DataLink_"])
 
 
 if __name__ == "__main__":

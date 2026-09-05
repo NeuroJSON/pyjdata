@@ -54,6 +54,7 @@ ENCODABLE = {
     ".img.gz": (".bnii", ("NIFTIData", "NIFTIExtension")),
     ".snirf": (".bnirs", ("SNIRFData",)),
     ".gii": (".bgii", ("GIFTIData",)),
+    ".gii.gz": (".bgii", ("GIFTIData",)),
     ".jmsh": (".bmsh", ()),
     ".mat": (".jdb", ()),
     # electrophysiology: header and per-channel calibration stay inline, the
@@ -61,6 +62,7 @@ ENCODABLE = {
     # MAT loader, which cannot follow the .fdt companion that holds the samples.
     ".set": (".beeg", ("EEGData",)),
     ".edf": (".beeg", ("EEGData",)),
+    ".edf.gz": (".beeg", ("EEGData",)),
     ".bdf": (".beeg", ("EEGData",)),
     ".vhdr": (".beeg", ("EEGData",)),
     # MEG/iEEG recordings that are directories rather than files. CTF and MEF3
@@ -72,6 +74,12 @@ ENCODABLE = {
 
 #: source extensions that name a directory, not a file
 CONTAINER_EXT = frozenset((".ds", ".mefd"))
+
+#: gzipped spellings of formats we already read. The payload is identical once
+#: inflated; only the source file name differs, so the wrapper records the
+#: original name and the gzip member header and otherwise treats them as the
+#: bare format.
+GZIPPED_EXT = {".gii.gz": ".gii", ".edf.gz": ".edf"}
 
 
 def container_digest(path, algo="sha256"):
@@ -102,6 +110,109 @@ def container_digest(path, algo="sha256"):
     for rel, digest in members:
         top.update(("%s %s\n" % (rel, digest)).encode("utf-8"))
     return top.hexdigest(), len(members)
+
+
+
+# ---------------------------------------------------------------------------
+# What may sit beside _DataLink_ in a document.
+#
+# The node is transitional: it carries just enough for annotation, commenting
+# and fast search, and a resolver replaces it wholesale with the linked object.
+# So the bar is "worth indexing", not "complete".
+#
+# Three rules, applied in this order:
+#   1. an ALLOWLIST, never a denylist -- a field nobody has vetted must not
+#      reach the searchable document merely because a reader started emitting
+#      it;
+#   2. no PHI, even when the source file carries it. 84% of EDF headers in this
+#      corpus hold a real-looking recording date and 30% a non-trivial patient
+#      identifier, all of which BIDS deliberately keeps out of its sidecars;
+#   3. nothing the BIDS sidecar already provides, which would duplicate the
+#      searchable layer and can disagree with it.
+# ---------------------------------------------------------------------------
+
+#: Never inlined, whatever a reader produces. Listed explicitly so the reason
+#: is auditable rather than implicit in an omission.
+PHI_KEYS = frozenset(
+    (
+        "PatientID", "RecordingID", "StartDate", "StartTime",
+        "data_date", "data_time", "nf_subject_id", "nf_operator",
+        "subject_name_1", "subject_name_2", "subject_ID", "recording_location",
+        "anonymized_name", "MeasurementDate", "MeasurementTime", "SubjectID",
+        "FIFF_MEAS_DATE", "recording_time_offset", "GMT_offset",
+        "PatientName", "PatientBirthDate", "PatientSex", "InstitutionName",
+    )
+)
+
+#: Provided by the BIDS sidecar or _channels.tsv already.
+SIDECAR_KEYS = frozenset(
+    (
+        "SamplingFrequency", "RecordingDuration", "PowerLineFrequency",
+        "TaskName", "Manufacturer", "NumberOfChannels", "EEGChannelCount",
+        "MEGChannelCount", "iEEGReference", "SoftwareFilters", "HardwareFilters",
+        "RecordingType",
+    )
+)
+
+
+def inline_info(path, ext):
+    """The transitional metadata node for a source file, or {} if none.
+
+    Raises nothing: a file that cannot be summarised simply gets no inline
+    metadata and is still linked.
+    """
+    reader = _INFO_READERS.get(GZIPPED_EXT.get(ext, ext))
+    if reader is None:
+        return {}
+    try:
+        info = reader(path)
+    except Exception:
+        return {}
+    return scrub_inline(info)
+
+
+def scrub_inline(info):
+    """Drop anything disallowed, whatever produced it."""
+    return {
+        k: v
+        for k, v in (info or {}).items()
+        if v is not None and k not in PHI_KEYS and k not in SIDECAR_KEYS
+    }
+
+
+def _eeg_info(path):
+    from .jeeg import eeginfo
+
+    return eeginfo(path)
+
+
+def _ctf_info(path):
+    from .jctf import ctfinfo
+
+    return ctfinfo(path)
+
+
+def _fiff_info(path):
+    from .jfiff import fiffinfo
+
+    return fiffinfo(path)
+
+
+def _mef3_info(path):
+    from .jmef3 import mef3info
+
+    return mef3info(path)
+
+
+_INFO_READERS = {
+    ".edf": _eeg_info,
+    ".bdf": _eeg_info,
+    ".vhdr": _eeg_info,
+    ".set": _eeg_info,
+    ".ds": _ctf_info,
+    ".mefd": _mef3_info,
+    ".fif": _fiff_info,
+}
 
 
 def encoder_for(ext):
@@ -158,6 +269,54 @@ def encode_attachment(path, ext, compression="zlib", nthread=1, level=None, **kw
 
 
 def _load(path, ext, **kwargs):
+    base = GZIPPED_EXT.get(ext)
+    if base is not None:
+        return _load_gzipped(path, ext, base, **kwargs)
+    return _load_plain(path, ext, **kwargs)
+
+
+def _load_gzipped(path, ext, base, **kwargs):
+    """Inflate to a scratch file named with the bare extension, then dispatch.
+
+    These readers take a path rather than a stream (EDF seeks by byte offset,
+    GIFTI hands the file to an XML parser), so the payload has to land on disk
+    under a name the dispatcher recognises.
+
+    The gzip member header is kept so a restore can reproduce the original file
+    name, timestamp and OS byte. The *content* round-trips exactly; the deflate
+    stream itself is not reproduced bit-for-bit, because gzip output depends on
+    the compressor and level that wrote it, which the container does not
+    record. This matches how .nii.gz has always been handled.
+    """
+    import gzip
+    import tempfile
+
+    with open(path, "rb") as fid:
+        header = fid.read(10)
+    with gzip.open(path, "rb") as fid:
+        blob = fid.read()
+
+    handle, scratch = tempfile.mkstemp(suffix=base)
+    try:
+        with os.fdopen(handle, "wb") as fid:
+            fid.write(blob)
+        data = _load_plain(scratch, base, **kwargs)
+    finally:
+        try:
+            os.unlink(scratch)
+        except OSError:
+            pass
+
+    if isinstance(data, dict):
+        block = data.setdefault("EEGSource" if base == ".edf" else "GIFTISource", {})
+        if isinstance(block, dict):
+            block["Gzipped"] = True
+            block["OriginalName"] = os.path.basename(path)
+            block["GzipHeader"] = {"_ByteStream_": header}
+    return data
+
+
+def _load_plain(path, ext, **kwargs):
     if ext in (".nii", ".nii.gz", ".hdr", ".img", ".img.gz"):
         from .jnifti import nii2jnii
 

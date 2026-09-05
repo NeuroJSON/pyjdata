@@ -35,6 +35,7 @@ Supported inputs: EDF, EDF+, BDF (``.edf``/``.bdf``), BrainVision
 author: Qianqian Fang <q.fang at neu.edu>
 """
 
+import hashlib
 import os
 import re
 
@@ -43,6 +44,9 @@ import numpy as np
 from .njdigest import bvheader, edfheader
 
 __all__ = [
+    "eeginfo",
+    "jeeg2bv",
+    "jeeg2eeglab",
     "eeg2jeeg",
     "jeeg2edf",
     "edf2jeeg",
@@ -236,6 +240,68 @@ def _source_block(filename, fmt, headerbytes=0):
 
     out["SHA256"] = digest.hexdigest()
     return out
+
+
+
+def eeginfo(filename):
+    """Transitional metadata for an electrophysiology file, header only.
+
+    Deliberately narrow: only fields that are absent from the BIDS sidecars,
+    carry no identifying information, and change what a reader would do before
+    fetching the payload. The EDF+ continuity flag is the load-bearing one --
+    a discontinuous recording read as continuous yields a wrong time axis with
+    no error, and nothing in BIDS records it.
+    """
+    ext = os.path.splitext(filename)[1].lower()
+
+    if ext in (".edf", ".bdf"):
+        from .njdigest import edfheader
+
+        head = edfheader(filename)["EDFHeader"]
+        fmt, continuity = _edf_subtype(head)
+        return {
+            "Format": fmt,
+            "Continuity": continuity,
+            "NumberOfSignals": head.get("NumberOfSignals"),
+            "NumberOfDataRecords": head.get("NumberOfDataRecords"),
+            "DurationOfDataRecord": head.get("DurationOfDataRecord"),
+        }
+
+    if ext == ".vhdr":
+        from .njdigest import bvheader
+
+        common, binary, _chan = _bv_sections(bvheader(filename))
+        return {
+            "Format": "BrainVision",
+            "DataOrientation": str(common.get("DataOrientation") or "").upper() or None,
+            "BinaryFormat": str(binary.get("BinaryFormat") or "").lower() or None,
+            "DataFormat": str(common.get("DataFormat") or "").upper() or None,
+        }
+
+    if ext == ".set":
+        from .njdigest import mat_digest
+
+        meta = mat_digest(filename)
+        get = lambda k: _scalar_from(meta, k)
+        return {
+            "Format": "EEGLAB",
+            "NumberOfTrials": get("trials"),
+            "PointsPerTrial": get("pnts"),
+        }
+
+    return {}
+
+
+def _scalar_from(meta, key):
+    """Pull one scalar out of a mat_digest tree without assuming its shape."""
+    stack = [meta]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            if key in node:
+                return _scalar(node[key], None, int)
+            stack.extend(node.values())
+    return None
 
 
 def _edf_subtype(head):
@@ -471,6 +537,7 @@ def bv2jeeg(filename, maxsamples=None):
         raise ValueError("unsupported BrainVision BinaryFormat %r" % fmt)
 
     binpath = _bv_binary(filename, common.get("DataFile"))
+    mrkpath = _bv_marker(filename, common.get("MarkerFile"))
     count = -1 if not maxsamples else int(maxsamples)
     raw = np.fromfile(binpath, dtype=dtype, count=count)
 
@@ -505,7 +572,86 @@ def bv2jeeg(filename, maxsamples=None):
         # with it plus BinaryFormat and DataOrientation the pair is rebuildable
         "EEGSource": _source_block(filename, "BrainVision", os.path.getsize(filename)),
         "EEGSourceBinary": _source_block(binpath, "BrainVision-binary"),
+        # BrainVision is a three-file format. The marker file was not captured
+        # at all, so nothing could rebuild it; it is small ASCII, so it is kept
+        # whole like the .vhdr.
+        **({"EEGSourceMarker": _source_block(mrkpath, "BrainVision-marker", os.path.getsize(mrkpath))}
+           if mrkpath else {}),
     }
+
+
+def jeeg2bv(jeeg, vhdrpath):
+    """Rebuild a BrainVision triplet from a JEEG structure.
+
+    Writes the ``.vhdr``, its binary companion and the ``.vmrk`` when one was
+    captured, into the directory of ``vhdrpath``. Returns {filename: sha256}
+    so a caller can check the result against ``EEGSource``/``EEGSourceBinary``
+    rather than assume it.
+
+    The ``.vhdr`` and ``.vmrk`` are restored byte-for-byte from the bytes kept
+    at read time: they are INI text whose exact spelling and key order no parse
+    preserves. Only the binary is regenerated, from ``EEGData``.
+    """
+    head = jeeg["EEGHeader"]
+    source = jeeg.get("EEGSource") or {}
+    outdir = os.path.dirname(os.path.abspath(vhdrpath)) or "."
+    written = {}
+
+    def put(name, blob):
+        with open(os.path.join(outdir, name), "wb") as fid:
+            fid.write(blob)
+        written[name] = hashlib.sha256(blob).hexdigest()
+
+    put(os.path.basename(vhdrpath), bytes(source["RawHeader"]["_ByteStream_"]))
+
+    marker = jeeg.get("EEGSourceMarker")
+    if marker and marker.get("RawHeader"):
+        name = head.get("MarkerFile") or (os.path.splitext(os.path.basename(vhdrpath))[0] + ".vmrk")
+        put(os.path.basename(str(name)), bytes(marker["RawHeader"]["_ByteStream_"]))
+
+    fmt = str(head.get("BinaryFormat") or "int_16").lower()
+    dtype = _BV_DTYPE.get(fmt)
+    if dtype is None:
+        raise ValueError("unsupported BrainVision BinaryFormat %r" % fmt)
+
+    data = np.asarray(jeeg["EEGData"])
+    orient = str(head.get("DataOrientation") or "MULTIPLEXED").upper()
+    flat = data.T.reshape(-1) if orient.startswith("MULTI") else data.reshape(-1)
+
+    binname = head.get("DataFile") or (os.path.splitext(os.path.basename(vhdrpath))[0] + ".eeg")
+    put(os.path.basename(str(binname)), np.ascontiguousarray(flat).astype(dtype).tobytes())
+    return written
+
+
+def jeeg2eeglab(jeeg, setpath):
+    """Rebuild an EEGLAB ``.set`` and, when there was one, its ``.fdt``.
+
+    The ``.set`` is a MAT file restored verbatim -- rebuilding one from parsed
+    contents would not reproduce its bytes -- and the ``.fdt`` is regenerated
+    from ``EEGData``, transposed back to the sample-fastest order EEGLAB
+    writes. Returns {filename: sha256}.
+    """
+    head = jeeg["EEGHeader"]
+    source = jeeg.get("EEGSource") or {}
+    outdir = os.path.dirname(os.path.abspath(setpath)) or "."
+    written = {}
+
+    def put(name, blob):
+        with open(os.path.join(outdir, name), "wb") as fid:
+            fid.write(blob)
+        written[name] = hashlib.sha256(blob).hexdigest()
+
+    raw = source.get("RawHeader")
+    if not raw:
+        raise ValueError("EEGSource carries no .set bytes; cannot rebuild")
+    put(os.path.basename(setpath), bytes(raw["_ByteStream_"]))
+
+    external = head.get("DataFile")
+    if external:
+        data = np.asarray(jeeg["EEGData"])
+        put(os.path.basename(str(external)),
+            np.ascontiguousarray(data.T).astype("<f4").tobytes())
+    return written
 
 
 def _bv_sections(meta):
@@ -534,6 +680,20 @@ def _bv_binary(vhdr, named):
             return path
 
     raise ValueError("BrainVision binary not found for %s" % vhdr)
+
+
+def _bv_marker(vhdr, named):
+    """Locate the .vmrk beside the header; absent is legal, so return None."""
+    base = os.path.dirname(os.path.abspath(vhdr))
+    stem = os.path.splitext(os.path.basename(vhdr))[0]
+    candidates = []
+    if named:
+        candidates.append(os.path.join(base, os.path.basename(str(named))))
+    candidates += [os.path.join(base, stem + e) for e in (".vmrk", ".VMRK")]
+    for path in candidates:
+        if os.path.exists(path) and os.path.exists(os.path.realpath(path)):
+            return path
+    return None
 
 
 def _bv_channels(chaninfo, nchan, srate):
@@ -613,10 +773,7 @@ def eeglab2jeeg(filename, maxsamples=None):
                 external = str(candidate)
 
     if external:
-        fdt = os.path.join(os.path.dirname(os.path.abspath(filename)), os.path.basename(external))
-
-        if not (os.path.exists(fdt) and os.path.exists(os.path.realpath(fdt))):
-            raise ValueError("EEGLAB .fdt companion not available: %s" % external)
+        fdt = _eeglab_fdt(filename, external)
 
         count = -1 if not maxsamples else int(maxsamples)
         flat = np.fromfile(fdt, dtype="<f4", count=count)
@@ -648,7 +805,8 @@ def eeglab2jeeg(filename, maxsamples=None):
             "NumberOfTrials": ntrial,
             "SamplingFrequency": srate,
             "RecordingDuration": (nsamp / srate) if (nsamp and srate) else None,
-            "DataFile": os.path.basename(external) if external else None,
+            "DataFile": os.path.basename(fdt) if external else None,
+            "DataFileReference": os.path.basename(str(external)) if external else None,
             "DataLayout": "channel-major",
         },
         "EEGChannels": [
@@ -662,9 +820,35 @@ def eeglab2jeeg(filename, maxsamples=None):
             for i in range(nchan or 0)
         ],
         "EEGData": samples,
-        "EEGSource": _source_block(filename, "EEGLAB"),
+        # the .set is a MAT file; no parse of it round-trips, so the bytes are
+        # what makes a rebuild possible. With an external .fdt it is small
+        # metadata; when the samples live inside the .set instead (about 5% of
+        # this corpus) the payload is carried twice, once verbatim and once
+        # decoded into EEGData.
+        "EEGSource": _source_block(filename, "EEGLAB", os.path.getsize(filename)),
         **({"EEGSourceBinary": fdtsource} if fdtsource else {}),
     }
+
+
+def _eeglab_fdt(setpath, named):
+    """Resolve the .fdt, falling back on the .set's own stem.
+
+    Renaming a recording into BIDS layout does not rewrite the name stored
+    inside the .set, so a file called sub-01_task-x_ieeg.set routinely points
+    at something like S_1_cond1_run1.fdt that no longer exists. Every .set in
+    ds003078 is like this. BrainVision's reader already falls back this way.
+    """
+    base = os.path.dirname(os.path.abspath(setpath))
+    stem = os.path.splitext(os.path.basename(setpath))[0]
+    candidates = [
+        os.path.join(base, os.path.basename(str(named))),
+        os.path.join(base, stem + ".fdt"),
+        os.path.join(base, stem + ".FDT"),
+    ]
+    for path in candidates:
+        if os.path.exists(path) and os.path.exists(os.path.realpath(path)):
+            return path
+    raise ValueError("EEGLAB .fdt companion not available: %s" % named)
 
 
 def _eeglab_labels(chanlocs, nchan):

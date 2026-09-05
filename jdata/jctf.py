@@ -219,10 +219,8 @@ def ctfinfo(dspath):
         head = _parse_res4(fid.read(1 << 16))
     return {
         "Format": "CTF",
-        "NumberOfChannels": head["no_channels"],
         "NumberOfSamples": head["no_samples"],
         "NumberOfTrials": head["no_trials"],
-        "SamplingFrequency": head["sample_rate"],
         "SplitParts": len(_meg4_parts(dspath)),
     }
 

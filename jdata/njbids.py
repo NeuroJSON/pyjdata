@@ -93,6 +93,7 @@ NJBIDS_DEFAULT = {
     # threads used inside the compressor for one attachment; zlib is
     # parallelised block-wise (see jdata.zlibmt) so this scales nearly linearly
     "encode_threads": 1,
+    "encode_level": None,
     # do not re-encode a payload larger than this (0 = no limit)
     "max_encode": 0,
 }
@@ -477,6 +478,31 @@ class _Converter:
             self.manifest.append(entry)
             self.manifest_index[relpath] = entry
             return entry
+        if os.path.isdir(path):
+            # CTF .ds and MEF3 .mefd are directories: there is no single file to
+            # hash. container_digest() folds the sorted member relpaths and
+            # their digests into one, which is deterministic, independent of
+            # path and host, and changes if any member byte changes -- the same
+            # properties the file digest gives, so the attachment name stays
+            # reproducible and the output DOI-capable.
+            from .njencode import container_digest
+
+            digest, members = container_digest(path)
+            entry = {
+                "path": relpath,
+                "algo": "sha256",
+                "sha256": digest,
+                "size": info.size if info is not None else 0,
+                "kind": kind,
+                "annexkey": key,
+                "present": True,
+                "stored": False,
+                "members": members,
+            }
+            self.manifest.append(entry)
+            self.manifest_index[relpath] = entry
+            return entry
+
         # identify() prefers whatever content hash the annex key already carries,
         # whichever backend produced it, and only reads the payload when there
         # is none to reuse
@@ -581,6 +607,12 @@ class _Converter:
                 return self._edf(path, relpath, size)
             if ext == ".set":
                 return self._eeglab(path, relpath, size)
+            if ext == ".ds":
+                return self._ctf(path, relpath, size)
+            if ext == ".mefd":
+                return self._mef3(path, relpath, size)
+            if ext == ".fif":
+                return self._fiff(path, relpath, size)
             if ext in (".nwb", ".h5", ".hdf5"):
                 return self._hdf5(path, relpath, size)
             if ext == ".mat":
@@ -642,6 +674,7 @@ class _Converter:
                     ext,
                     compression=codec,
                     nthread=int(self.config.get("encode_threads") or 1),
+                    level=self.config.get("encode_level"),
                 )
             except Exception as err:
                 self.errors.append(
@@ -846,10 +879,50 @@ class _Converter:
             self._count("eeg-encodefail")
             return fallback()
 
-        header = {k: v for k, v in jeeg.items() if k != "EEGData"}
-        header["EEGData"] = attached
+        # The parsed header used to be inlined whole, which put PatientID,
+        # StartDate and StartTime straight into the searchable document. It all
+        # lives in the attachment now; what stays behind is the vetted summary.
+        from .njencode import inline_info
+
+        node = dict(attached)
+        node.update(inline_info(path, ext))
         self._count("eeg-encoded")
-        return header
+        return node
+
+    def _recording(self, path, relpath, size, kind, ext, names):
+        """Encode a MEG/iEEG recording and link it, with transitional metadata.
+
+        The node is the link plus a small vetted summary, and a resolver
+        replaces the whole node with the fetched object. The summary carries no
+        PHI and nothing the BIDS sidecar already provides -- see
+        njencode.inline_info -- so it is safe to index and cheap to search
+        without standing in for the data.
+        """
+        from .njencode import inline_info
+
+        wanted = self.config.get("encode", ())
+        if not any(n in wanted for n in names):
+            return self._safe_link(path, relpath, kind, "link")
+
+        attached = self._attachment_link(path, relpath, kind, ext, self._info)
+
+        if attached is None:
+            self._count("%s-encodefail" % kind)
+            return self._safe_link(path, relpath, kind, "link")
+
+        node = dict(attached)
+        node.update(inline_info(path, ext))
+        self._count("%s-encoded" % kind)
+        return node
+
+    def _ctf(self, path, relpath, size):
+        return self._recording(path, relpath, size, "ctf", ".ds", ("ctf", "meg"))
+
+    def _mef3(self, path, relpath, size):
+        return self._recording(path, relpath, size, "mef3", ".mefd", ("mef3", "ieeg"))
+
+    def _fiff(self, path, relpath, size):
+        return self._recording(path, relpath, size, "fiff", ".fif", ("fiff", "meg"))
 
     def _eeglab(self, path, relpath, size):
         from .njdigest import eeglab_digest

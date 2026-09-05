@@ -10,6 +10,8 @@ To run:
 """
 
 import os
+import shutil
+import hashlib
 import struct
 import sys
 import tempfile
@@ -19,7 +21,8 @@ import numpy as np
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from jdata.jeeg import bv2jeeg, edf2jeeg, eeg2jeeg, jeeg2edf
+from jdata.jeeg import (bv2jeeg, edf2jeeg, eeg2jeeg, eeglab2jeeg, eeginfo,
+                        jeeg2bv, jeeg2edf, jeeg2eeglab)
 
 
 def write_edf(path, nsig=2, nrec=3, persig=4, srate_dur=1.0, bdf=False, signals=None):
@@ -258,6 +261,153 @@ class TestJDataRoundTrip(unittest.TestCase):
             self.assertEqual(
                 back["EEGHeader"]["NumberOfSignals"], jeeg["EEGHeader"]["NumberOfSignals"]
             )
+
+
+
+class TestBrainVisionWriter(unittest.TestCase):
+    """BrainVision is a three-file format; all three must come back."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.vhdr = os.path.join(self.tmp, "sub-01_eeg.vhdr")
+        write_brainvision(self.vhdr, nchan=4, nsamp=64)
+        with open(os.path.join(self.tmp, "sub-01_eeg.vmrk"), "wb") as fid:
+            fid.write(
+                b"Brain Vision Data Exchange Marker File\n[Common Infos]\n"
+                b"DataFile=sub-01_eeg.eeg\n[Marker Infos]\nMk1=New Segment,,1,1,0\n"
+            )
+        raw = open(self.vhdr, "rb").read()
+        if b"MarkerFile" not in raw:
+            raw = raw.replace(b"DataFile=", b"MarkerFile=sub-01_eeg.vmrk\nDataFile=", 1)
+            open(self.vhdr, "wb").write(raw)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _digests(self, folder):
+        out = {}
+        for name in sorted(os.listdir(folder)):
+            full = os.path.join(folder, name)
+            if os.path.isfile(full):
+                with open(full, "rb") as fid:
+                    out[name] = hashlib.sha256(fid.read()).hexdigest()
+        return out
+
+    def test_marker_file_is_captured(self):
+        self.assertIn("EEGSourceMarker", bv2jeeg(self.vhdr))
+
+    def test_roundtrip_all_three_files(self):
+        before = self._digests(self.tmp)
+        out = os.path.join(self.tmp, "rebuilt")
+        os.makedirs(out)
+        got = jeeg2bv(bv2jeeg(self.vhdr), os.path.join(out, "sub-01_eeg.vhdr"))
+        self.assertEqual(set(got), set(before))
+        self.assertEqual(got, before)
+
+    def test_vectorized_layout_roundtrips(self):
+        raw = open(self.vhdr, "rb").read().replace(b"MULTIPLEXED", b"VECTORIZED")
+        open(self.vhdr, "wb").write(raw)
+        before = self._digests(self.tmp)
+        out = os.path.join(self.tmp, "rebuilt")
+        os.makedirs(out)
+        got = jeeg2bv(bv2jeeg(self.vhdr), os.path.join(out, "sub-01_eeg.vhdr"))
+        self.assertEqual(got["sub-01_eeg.eeg"], before["sub-01_eeg.eeg"])
+
+
+class TestEEGLABFdtFallback(unittest.TestCase):
+    """A .set renamed into BIDS layout still names its old .fdt."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_fallback_resolves_by_stem(self):
+        from jdata.jeeg import _eeglab_fdt
+
+        setpath = os.path.join(self.tmp, "sub-01_task-x_ieeg.set")
+        open(setpath, "wb").write(b"stub")
+        want = os.path.join(self.tmp, "sub-01_task-x_ieeg.fdt")
+        open(want, "wb").write(b"data")
+        self.assertEqual(_eeglab_fdt(setpath, "S_1_cond1_run1.fdt"), want)
+
+    def test_missing_companion_still_raises(self):
+        from jdata.jeeg import _eeglab_fdt
+
+        setpath = os.path.join(self.tmp, "sub-01_task-x_ieeg.set")
+        open(setpath, "wb").write(b"stub")
+        self.assertRaises(ValueError, _eeglab_fdt, setpath, "nowhere.fdt")
+
+
+class TestEegInfoPolicy(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_edf_summary_has_no_phi(self):
+        from jdata.njencode import PHI_KEYS, SIDECAR_KEYS
+
+        path = os.path.join(self.tmp, "x.edf")
+        write_edf(path, nsig=3, nrec=4, persig=8)
+        info = eeginfo(path)
+        self.assertEqual(info["Format"], "EDF")
+        self.assertFalse([k for k in info if k in PHI_KEYS or k in SIDECAR_KEYS])
+
+    def test_edf_plus_discontinuous_is_reported(self):
+        path = os.path.join(self.tmp, "d.edf")
+        write_edf(path, nsig=2, nrec=3, persig=8)
+        with open(path, "r+b") as fid:
+            fid.seek(192)
+            fid.write(b"EDF+D".ljust(44))
+        info = eeginfo(path)
+        self.assertEqual(info["Format"], "EDF+")
+        self.assertEqual(info["Continuity"], "discontinuous")
+
+
+class TestGzippedSources(unittest.TestCase):
+    """.edf.gz is the same payload; only the source file name differs."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_edf_gz_reads_as_edf(self):
+        import gzip
+        from jdata.njencode import encode_attachment, encoder_for
+
+        plain = os.path.join(self.tmp, "x.edf")
+        write_edf(plain, nsig=3, nrec=4, persig=8)
+        gzpath = os.path.join(self.tmp, "x.edf.gz")
+        with open(plain, "rb") as src, gzip.open(gzpath, "wb") as dst:
+            dst.write(src.read())
+        self.assertEqual(encoder_for(".edf.gz"), encoder_for(".edf"))
+        _h, payload, ext, keys = encode_attachment(gzpath, ".edf.gz", compression="zlib")
+        self.assertEqual(ext, ".beeg")
+        self.assertEqual(keys, ("EEGData",))
+        import jdata as jd
+
+        back = jd.loadbs(payload)
+        self.assertTrue(back["EEGSource"]["Gzipped"])
+        self.assertEqual(back["EEGSource"]["OriginalName"], "x.edf.gz")
+
+    def test_gz_and_plain_give_the_same_samples(self):
+        import gzip
+        import numpy as np
+        from jdata.njencode import _load
+
+        plain = os.path.join(self.tmp, "x.edf")
+        write_edf(plain, nsig=3, nrec=4, persig=8)
+        gzpath = os.path.join(self.tmp, "x.edf.gz")
+        with open(plain, "rb") as src, gzip.open(gzpath, "wb") as dst:
+            dst.write(src.read())
+        self.assertTrue(
+            np.array_equal(_load(plain, ".edf")["EEGData"], _load(gzpath, ".edf.gz")["EEGData"])
+        )
 
 
 if __name__ == "__main__":

@@ -42,6 +42,7 @@ from . import csvtsv
 from . import h5
 from . import jnifti
 from . import jgifti
+from . import jeeg
 from . import jctf
 from . import jfiff
 from . import jmef3
@@ -64,6 +65,7 @@ from .csvtsv import *
 from .h5 import *
 from .jnifti import *
 from .jgifti import *
+from .jeeg import *
 from .jctf import *
 from .jfiff import *
 from .jmef3 import *
@@ -90,6 +92,7 @@ __all__ = (
     + h5.__all__
     + jnifti.__all__
     + jgifti.__all__
+    + jeeg.__all__
     + jctf.__all__
     + jfiff.__all__
     + jmef3.__all__
@@ -111,6 +114,7 @@ __all__ = (
         "h5",
         "jnifti",
         "jgifti",
+        "jeeg",
         "jctf",
         "jfiff",
         "jmef3",

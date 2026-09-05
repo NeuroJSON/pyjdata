@@ -204,6 +204,8 @@ def cmd_convert(args):
     # not conditional on --ai-summary: nesting it there silently pinned every
     # other run to one thread whatever --encode-threads said
     options["njbids"]["encode_threads"] = args.encode_threads
+    if getattr(args, "compress_level", None) is not None:
+        options["njbids"]["encode_level"] = args.compress_level
     if args.max_encode:
         options["njbids"]["max_encode"] = args.max_encode
     if args.no_split:
@@ -892,10 +894,11 @@ def build_parser():
     conv.add_argument(
         "--encode",
         nargs="*",
-        choices=["nii", "snirf", "gii", "mat", "eeg"],
+        choices=["nii", "snirf", "gii", "mat", "eeg", "ctf", "fiff", "mef3", "meg", "ieeg"],
         help="re-encode these modality payloads into binary JData attachments "
-        "named <sha256>_<codec>.<bnii|bnirs|bgii|jdb|jeeg>, instead of referencing "
-        "the original file. Requires reading (and rewriting) every payload.",
+        "named <sha256>_<codec>.<bnii|bnirs|bgii|jdb|beeg|bmeg|bfif|bmef>, instead "
+        "of referencing the original file. 'meg' covers ctf and fiff, 'ieeg' covers "
+        "mef3. Requires reading (and rewriting) every payload.",
     )
     conv.add_argument(
         "--ai-summary",
@@ -911,6 +914,15 @@ def build_parser():
         choices=["zlib", "lzma", "lz4", "blosc2zstd", "blosc2lz4", "none"],
         help="compression inside the attachment (default zlib; blosc2zstd is "
         "both smaller and faster)",
+    )
+    conv.add_argument(
+        "--compress-level",
+        type=int,
+        default=None,
+        help="zlib level 0-9 for attachment payloads (default 6). Level 1 is "
+        "roughly 5.6x faster across CTF recordings for about 2%% more bytes, but "
+        "which level is smallest varies by dataset, so this is a deliberate "
+        "trade rather than a universal win.",
     )
     conv.add_argument(
         "--encode-threads",

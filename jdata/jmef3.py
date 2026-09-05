@@ -163,8 +163,6 @@ def mef3info(mefd):
         "MEFVersion": version,
         "Encrypted": encrypted,
         "Compression": "RED",
-        "NumberOfChannels": nchan,
-        "SamplingFrequency": freq,
     }
 
 
