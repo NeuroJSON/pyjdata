@@ -12,7 +12,7 @@ offset, and a negative value ends a block.
       "FIFFData": {
         "TagDirectory": ndarray [ntag, 4],   # kind, type, size, next -- verbatim
         "Tags":    [ {...}, ... ],           # small tags, payload kept as bytes
-        "TagData": [ ndarray, ... ]          # the bulk payloads, lifted out
+        "TagData": ndarray                   # every bulk payload, concatenated
       },
       "FIFFSource": {...}
     }
@@ -121,7 +121,8 @@ def fiff2jfiff(filename, **kwargs):
 
     directory = []
     tags = []
-    bulk = []
+    chunks = []
+    filled = 0
     for off, kind, typ, size, nxt in _walk_tags(raw):
         directory.append([kind, typ, size, nxt])
         payload = raw[off + _TAGHDR : off + _TAGHDR + size]
@@ -130,8 +131,14 @@ def fiff2jfiff(filename, **kwargs):
         if name:
             entry["KindName"] = name
         if size >= _BULK_BYTES:
-            entry["Data"] = len(bulk)
-            bulk.append(np.frombuffer(payload, dtype=np.uint8))
+            # One concatenated array, not one array per tag. A raw recording
+            # holds ~1800 data buffers of ~200 KB; compressed separately every
+            # one of them falls below the block size, so none gets an
+            # _ArrayZipOffsets_ index and the whole payload loses parallel
+            # inflate. Concatenated, the stream is indexed and blocks span it.
+            entry["DataOffset"] = filled
+            chunks.append(payload)
+            filled += size
         else:
             entry["_ByteStream_"] = payload
         tags.append(entry)
@@ -143,8 +150,8 @@ def fiff2jfiff(filename, **kwargs):
         "TagDirectory": np.asarray(directory, dtype=np.int32).reshape(-1, 4),
         "Tags": tags,
     }
-    if bulk:
-        data["TagData"] = bulk
+    if chunks:
+        data["TagData"] = np.frombuffer(b"".join(chunks), dtype=np.uint8)
 
     source = {
         "Format": "FIFF",
@@ -166,14 +173,15 @@ def jfiff2fiff(jfiff, filename):
     data = jfiff["FIFFData"]
     src = jfiff.get("FIFFSource", {})
     directory = np.asarray(data["TagDirectory"], dtype=np.int32).reshape(-1, 4)
-    bulk = data.get("TagData", [])
+    bulk = np.asarray(data.get("TagData", []), dtype=np.uint8)
 
     out = bytearray()
     for row, tag in zip(directory, data["Tags"]):
         kind, typ, size, nxt = (int(v) for v in row)
         out += struct.pack(">4i", kind, typ, size, nxt)
-        if "Data" in tag:
-            out += np.asarray(bulk[tag["Data"]], dtype=np.uint8).tobytes()
+        if "DataOffset" in tag:
+            start = int(tag["DataOffset"])
+            out += bulk[start : start + size].tobytes()
         else:
             out += bytes(tag["_ByteStream_"])
 

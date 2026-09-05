@@ -250,8 +250,9 @@ class TestFIFF(TempCase):
         """Bulk selection must not depend on the unverified constants table."""
         path, payloads = self.build()
         d = fiff2jfiff(path)["FIFFData"]
-        self.assertEqual(len(d["TagData"]), 1)
-        self.assertEqual(len(d["TagData"][0]), 70000)
+        self.assertEqual(len(d["TagData"]), 70000)
+        self.assertEqual(d["Tags"][4]["DataOffset"], 0)
+        self.assertNotIn("DataOffset", d["Tags"][0])
 
     def test_kind_is_authoritative_name_is_advisory(self):
         """A kind absent from the advisory table must still round-trip."""
