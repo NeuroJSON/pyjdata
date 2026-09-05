@@ -118,7 +118,7 @@ def attachment_name(digest, compression, ext):
     return "%s%s%s" % (digest, codec, ext)
 
 
-def encode_attachment(path, ext, compression="zlib", nthread=1, **kwargs):
+def encode_attachment(path, ext, compression="zlib", nthread=1, level=None, **kwargs):
     """Read a modality file and produce its binary JData attachment.
 
     Returns ``(header, payload, attachment_ext, bulk_keys)`` where
@@ -145,7 +145,7 @@ def encode_attachment(path, ext, compression="zlib", nthread=1, **kwargs):
     if not isinstance(data, dict):
         data = {"Data": data}
 
-    payload = _serialise(data, compression, nthread)
+    payload = _serialise(data, compression, nthread, level)
 
     present = tuple(k for k in bulk_keys if k in data)
     if not present:
@@ -208,7 +208,7 @@ def _load_mat(path):
     return {k: v for k, v in raw.items() if not k.startswith("__")}
 
 
-def _serialise(data, compression, nthread=1):
+def _serialise(data, compression, nthread=1, level=None):
     """JData-encode a structure and serialise it as BJData bytes.
 
     ``encode`` applies the JData array annotations and the compression codec, so
@@ -224,6 +224,7 @@ def _serialise(data, compression, nthread=1):
         compression=compression or None,
         compressarraysize=0,
         nthread=nthread,
+        **({} if level is None else {"compresslevel": int(level)})
     )
     return bytes(dumpb(annotated))
 

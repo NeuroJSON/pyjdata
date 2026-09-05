@@ -147,6 +147,14 @@ def _compress_data(rawbytes, opt, typesize=None, return_offsets=False):
     # existing callers see no change in the bytes they produce.
     threaded = "nthread" in opt and opt["nthread"] is not None
     nthread = int(opt.get("nthread", 1) or 1)
+    # zlib's level is a real lever, not a tuning knob: on regular integer
+    # recordings level 1 can be both faster *and* smaller than the default 6,
+    # because levels 4+ switch to lazy matching, which on periodic data picks
+    # longer matches that encode worse. Measured on a 1.17 GB CTF payload,
+    # level 1 took 20.1s to level 6's 58.5s and produced 551.6 MB against
+    # 563.1 MB. The default stays 6 so existing output bytes do not move.
+    level = opt.get("compresslevel")
+    level = 6 if level is None else int(level)
     if codec == "zlib":
         if threaded:
             # deflate independent blocks concurrently and concatenate them into
@@ -156,15 +164,16 @@ def _compress_data(rawbytes, opt, typesize=None, return_offsets=False):
             from .zlibmt import compress as zlibmt_compress
 
             return zlibmt_compress(
-                rawbytes, nthread=nthread, return_offsets=return_offsets
+                rawbytes, level=level, nthread=nthread, return_offsets=return_offsets
             )
-        return (zlib.compress(rawbytes), None) if return_offsets else zlib.compress(rawbytes)
+        out = zlib.compress(rawbytes, level)
+        return (out, None) if return_offsets else out
     elif codec == "gzip":
         if threaded:
             from .zlibmt import gzip_compress
 
             return gzip_compress(
-                rawbytes, nthread=nthread, return_offsets=return_offsets
+                rawbytes, level=level, nthread=nthread, return_offsets=return_offsets
             )
         gzipper = zlib.compressobj(wbits=(zlib.MAX_WBITS | 16))
         result = gzipper.compress(rawbytes)

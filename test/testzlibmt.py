@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 
+import jdata as jd
 from jdata.zlibmt import (
     DEFAULT_BLOCKSIZE,
     compress,
@@ -396,6 +397,53 @@ class TestZipOffsetsInJdata(unittest.TestCase):
         blob = self.jd.dumpb(encoded)
         back = self.jd.loadbs(blob, nthread=8)
         self.assertTrue(np.array_equal(back["v"], self.array))
+
+
+
+class TestCompressLevel(unittest.TestCase):
+    """opt['compresslevel'] reaches zlib. The default must not move, because
+    the attachment bytes are what makes a converted dataset reproducible."""
+
+    def setUp(self):
+        rng = np.random.default_rng(7)
+        base = rng.integers(-2000, 2000, size=64000, dtype=np.int32)
+        self.obj = {"x": np.repeat(base, 5).reshape(5, -1)}
+
+    def _enc(self, **kw):
+        return jd.encode(self.obj, compression="zlib", compressarraysize=0, **kw)["x"][
+            "_ArrayZipData_"
+        ]
+
+    def test_default_is_level_six(self):
+        self.assertEqual(bytes(self._enc()), bytes(self._enc(compresslevel=6)))
+
+    def test_omitting_level_matches_historical_output(self):
+        self.assertEqual(bytes(self._enc(nthread=4)), bytes(self._enc(nthread=4, compresslevel=6)))
+
+    def test_level_changes_the_bytes(self):
+        self.assertNotEqual(bytes(self._enc(compresslevel=1)), bytes(self._enc(compresslevel=9)))
+
+    def test_every_level_round_trips(self):
+        for lvl in range(10):
+            enc = jd.encode(
+                self.obj, compression="zlib", compressarraysize=0, compresslevel=lvl
+            )
+            self.assertTrue(
+                np.array_equal(jd.decode(enc)["x"], self.obj["x"]), "level %d" % lvl
+            )
+
+    def test_level_applies_to_the_threaded_path_too(self):
+        one = self._enc(nthread=4, compresslevel=1)
+        six = self._enc(nthread=4, compresslevel=6)
+        self.assertNotEqual(bytes(one), bytes(six))
+        for blob in (one, six):
+            enc = jd.encode(self.obj, compression="zlib", compressarraysize=0, nthread=4)
+            self.assertTrue(len(blob) > 0)
+
+    def test_threaded_output_is_independent_of_thread_count(self):
+        a = self._enc(nthread=2, compresslevel=1)
+        b = self._enc(nthread=8, compresslevel=1)
+        self.assertEqual(bytes(a), bytes(b))
 
 
 if __name__ == "__main__":
