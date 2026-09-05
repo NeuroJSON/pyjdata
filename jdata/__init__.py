@@ -42,6 +42,9 @@ from . import csvtsv
 from . import h5
 from . import jnifti
 from . import jgifti
+from . import jctf
+from . import jfiff
+from . import jmef3
 from . import jpath
 from . import jschema
 from . import njprep
@@ -61,6 +64,9 @@ from .csvtsv import *
 from .h5 import *
 from .jnifti import *
 from .jgifti import *
+from .jctf import *
+from .jfiff import *
+from .jmef3 import *
 from .jpath import *
 from .jschema import *
 from .njprep import *
@@ -84,6 +90,9 @@ __all__ = (
     + h5.__all__
     + jnifti.__all__
     + jgifti.__all__
+    + jctf.__all__
+    + jfiff.__all__
+    + jmef3.__all__
     + jpath.__all__
     + jschema.__all__
     + njprep.__all__
@@ -102,6 +111,9 @@ __all__ = (
         "h5",
         "jnifti",
         "jgifti",
+        "jctf",
+        "jfiff",
+        "jmef3",
         "jpath",
         "jschema",
         "neurojson",
