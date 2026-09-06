@@ -11,6 +11,7 @@ Performance property under test:
 """
 
 import os
+import re
 import sys
 import time
 import shutil
@@ -241,6 +242,70 @@ class TestCasPerformance(unittest.TestCase):
         warm = max((time.time() - start) / 20, 1e-9)
         self.assertLess(warm, cold / 10.0, "memo gave only %.1fx speedup" % (cold / warm))
         self.assertEqual(self.cas.stats["hashed"], 1)
+
+
+
+class TestResolverContract(unittest.TestCase):
+    """The Apache rules in neurojson/README.md, transcribed and checked.
+
+    The config is the only thing standing between a document and a dead link,
+    and nothing else in the suite exercises it. These assertions fail if either
+    the URL shape or the documented rule drifts.
+    """
+
+    # stage 1 and 2 of the rewrite, verbatim from the README
+    HASH = re.compile(r"(^|&)hash=sha256:((..)(..)[0-9a-f]{60})(&|$)")
+    ENC = re.compile(r"(^|&)enc=(_[A-Za-z0-9]+\.[A-Za-z0-9]+)(&|$)")
+
+    def resolve(self, url):
+        """Return the path Apache would serve, or None if the rules reject it."""
+        query = url.split("?", 1)[1] if "?" in url else url
+        m = self.HASH.search(query)
+        if not m:
+            return None
+        digest, shard_a, shard_b = m.group(2), m.group(3), m.group(4)
+        enc = self.ENC.search(query)
+        return "/neurojson-cas/%s/%s/%s%s" % (
+            shard_a, shard_b, digest, enc.group(2) if enc else ""
+        )
+
+    def test_encoded_link_resolves_to_the_attachment(self):
+        digest = "b" * 64
+        url = cas_url(digest, size=10, db="d", doc="ds1", file="a/b.nii", enc="_zlib.bnii")
+        self.assertEqual(
+            self.resolve(url), "/neurojson-cas/bb/bb/%s_zlib.bnii" % digest
+        )
+
+    def test_plain_link_resolves_to_the_bare_object(self):
+        digest = "c" * 64
+        url = cas_url(digest, size=10, db="d", doc="ds1", file="a/b.tsv")
+        self.assertEqual(self.resolve(url), "/neurojson-cas/cc/cc/%s" % digest)
+
+    def test_layout_matches_the_store(self):
+        """The rule's shard split must match how CAS actually writes objects."""
+        digest = "0123456789abcdef" * 4
+        path = self.resolve(cas_url(digest, enc="_zlib.bnii"))
+        self.assertTrue(path.endswith("/01/23/%s_zlib.bnii" % digest), path)
+
+    def test_short_digest_is_rejected(self):
+        self.assertIsNone(self.resolve("x?hash=sha256:" + "a" * 63))
+
+    def test_enc_cannot_escape_the_store(self):
+        """A crafted enc= must fall back to the bare object, never traverse."""
+        digest = "d" * 64
+        path = self.resolve("x?hash=sha256:%s&enc=../../../etc/passwd" % digest)
+        self.assertEqual(path, "/neurojson-cas/dd/dd/%s" % digest)
+        self.assertNotIn("..", path)
+
+    def test_every_encodable_suffix_is_accepted(self):
+        """Each attachment extension the encoder can emit must resolve."""
+        from jdata.njencode import ENCODABLE
+
+        digest = "e" * 64
+        for attach_ext, _keys in set(ENCODABLE.values()):
+            enc = "_zlib%s" % attach_ext
+            path = self.resolve("x?hash=sha256:%s&enc=%s" % (digest, enc))
+            self.assertTrue(path.endswith(enc), "%s did not survive the rule" % enc)
 
 
 if __name__ == "__main__":

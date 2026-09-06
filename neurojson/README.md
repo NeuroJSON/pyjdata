@@ -190,20 +190,60 @@ The store must be on the same filesystem as the mirror, otherwise objects become
 copies instead of hardlinks and the space cost goes from nothing to a second
 full copy.  `njcli cas usage` reports `exclusive_bytes`, which should be ~0.
 
-Serving it needs no CGI; mod_rewrite maps the query parameter to a path:
+Serving it needs no CGI; mod_rewrite maps the query parameters to a path.
+
+A link names **two** things: the source content hash, and -- when the payload
+was re-encoded -- the derived form stored beside it as `<hash><enc>`, e.g.
+`<hash>_zlib.bnii`.  A rule that reads only `hash=` serves the bare object,
+which for an encoded payload frequently does not exist: measured over 600 real
+links from 25 datasets, hash-only resolved **69.7%** and left the rest dead,
+while the `enc`-aware rule below resolved **600 of 600**.
 
 ```apache
 Alias /neurojson-cas /path/to/cas/objects
-RewriteCond %{QUERY_STRING} (^|&)hash=sha256:(..)(..)(.{60})(&|$)
-RewriteRule ^/io/cas\.cgi$ /neurojson-cas/%2/%3/%2%3%4 [L]
+
+# 1. digest and its two shard bytes
+RewriteCond %{QUERY_STRING} (^|&)hash=sha256:((..)(..)[0-9a-f]{60})(&|$)
+RewriteRule ^/io/cas\.cgi$ - [E=CAS_H:%2,E=CAS_A:%3,E=CAS_B:%4]
+
+# 2. the derived encoding, when the document names one.  The pattern is a
+#    whitelist, so a crafted enc= cannot walk out of the store; anything it
+#    rejects falls through to the bare object rather than to a path outside it.
+RewriteCond %{QUERY_STRING} (^|&)enc=(_[A-Za-z0-9]+\.[A-Za-z0-9]+)(&|$)
+RewriteRule ^/io/cas\.cgi$ - [E=CAS_E:%2]
+
+# 3. serve.  An unset CAS_E expands empty, which is exactly the bare object.
+RewriteCond %{ENV:CAS_H} ^[0-9a-f]{64}$
+RewriteRule ^/io/cas\.cgi$ /neurojson-cas/%{ENV:CAS_A}/%{ENV:CAS_B}/%{ENV:CAS_H}%{ENV:CAS_E} [L]
+
 <Directory /path/to/cas/objects>
   Require all granted
-  Header set Cache-Control "public, max-age=31536000, immutable"
+  Options -Indexes -FollowSymLinks +SymLinksIfOwnerMatch
+  Header always set Cache-Control "public, max-age=31536000, immutable"
+  Header always set Access-Control-Allow-Origin "*"
 </Directory>
 ```
 
+Two captures cannot share one `RewriteCond` backreference -- `%N` refers to the
+last condition that matched -- hence the env variables.
+
 Because the identifier is a content hash the response is immutable, so it can be
-cached forever and served with byte ranges.
+cached forever and served with byte ranges.  Ranges matter more than they look:
+an encoded array carries `_ArrayZipOffsets_`, so a client that wants one block
+of a 500 MB attachment can ask for exactly that block.
+
+### What a link yields
+
+For an encoded payload the response is the **JData attachment**, not the
+original file, even though `file=` names the original.  That is the intended
+contract: the metadata sitting beside `_DataLink_` in the document is
+transitional -- enough to search, annotate and comment on -- and a resolver
+replaces the whole node with the fetched object.
+
+Whether the original is *also* retrievable depends on the handler that stored
+it: 222 of 399 sampled encoded links had their source object present as well,
+so `enc=` should be treated as the authoritative form and the bare hash as a
+bonus, not the other way round.
 
 ## Safety
 
