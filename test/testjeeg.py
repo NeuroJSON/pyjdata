@@ -410,6 +410,79 @@ class TestGzippedSources(unittest.TestCase):
         )
 
 
+
+class TestMatlabV73Detection(unittest.TestCase):
+    """MATLAB v7.3 hides the HDF5 signature behind a 512-byte userblock.
+
+    Every magic check in the tree read offset 0 only, so no v7.3 file was ever
+    recognised as HDF5 and 1334 EEGLAB .set files in one conversion pass failed
+    with "Please use HDF reader for matlab v7.3 files".
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _write(self, name, payload):
+        path = os.path.join(self.tmp, name)
+        with open(path, "wb") as fid:
+            fid.write(payload)
+        return path
+
+    def test_plain_hdf5_detected(self):
+        from jdata.njdigest import is_hdf5, HDF5_SIGNATURE
+
+        self.assertTrue(is_hdf5(self._write("a.h5", HDF5_SIGNATURE + b"\x00" * 64)))
+
+    def test_matlab_v73_userblock_detected(self):
+        from jdata.njdigest import is_hdf5, HDF5_SIGNATURE
+
+        blob = b"MATLAB 7.3 MAT-file, ".ljust(512, b"\x00") + HDF5_SIGNATURE
+        self.assertTrue(is_hdf5(self._write("a.set", blob)))
+
+    def test_userblock_at_a_larger_power_of_two(self):
+        """The standard allows any power-of-two offset from 512 upward."""
+        from jdata.njdigest import is_hdf5, HDF5_SIGNATURE
+
+        blob = b"MATLAB 7.3 MAT-file, ".ljust(2048, b"\x00") + HDF5_SIGNATURE
+        self.assertTrue(is_hdf5(self._write("a.set", blob)))
+
+    def test_mat_v5_is_not_hdf5(self):
+        from jdata.njdigest import is_hdf5
+
+        blob = b"MATLAB 5.0 MAT-file, ".ljust(126, b"\x00") + b"IM" + b"\x00" * 32
+        self.assertFalse(is_hdf5(self._write("a.mat", blob)))
+
+    def test_missing_file_is_not_hdf5(self):
+        from jdata.njdigest import is_hdf5
+
+        self.assertFalse(is_hdf5(os.path.join(self.tmp, "nope.set")))
+
+    def test_v5_set_still_routes_to_scipy(self):
+        """The fix must not divert ordinary v5 files to the HDF5 reader."""
+        from jdata.njdigest import is_hdf5
+
+        blob = b"MATLAB 5.0 MAT-file, ".ljust(126, b"\x00") + b"IM" + b"\x00" * 64
+        self.assertFalse(is_hdf5(self._write("b.set", blob)))
+
+    def test_char_array_decoding(self):
+        """v7.3 stores MATLAB char arrays as uint16 code points."""
+        import numpy as np
+        from jdata.jeeg import _chars
+
+        arr = np.array([[ord(c)] for c in "sub-001_eeg.fdt"], dtype=np.uint16)
+        self.assertEqual(_chars(arr), "sub-001_eeg.fdt")
+
+    def test_char_array_ignores_trailing_nulls(self):
+        import numpy as np
+        from jdata.jeeg import _chars
+
+        arr = np.array([[ord("a")], [ord("b")], [0], [0]], dtype=np.uint16)
+        self.assertEqual(_chars(arr), "ab")
+
+
 if __name__ == "__main__":
     unittest.main()
 

@@ -355,9 +355,11 @@ def _load_plain(path, ext, **kwargs):
 
 
 def _load_mat(path):
-    with open(path, "rb") as fid:
-        magic = fid.read(8)
-    if magic == b"\x89HDF\r\n\x1a\n":
+    # MATLAB v7.3 is HDF5 behind a 512-byte userblock, so the signature is not
+    # at offset 0 and a naive magic check sends it to scipy, which refuses it.
+    from .njdigest import is_hdf5
+
+    if is_hdf5(path):
         from .h5 import loadh5
 
         return loadh5(path)

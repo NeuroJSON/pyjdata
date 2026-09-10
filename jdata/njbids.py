@@ -977,9 +977,9 @@ class _Converter:
             self._count("mat-unrecognised")
             return self._link(entry)
 
-        with open(path, "rb") as fid:
-            magic = fid.read(8)
-        if magic == b"\x89HDF\r\n\x1a\n":
+        from .njdigest import is_hdf5
+
+        if is_hdf5(path):
             digest = {"MATData": hdf5_digest(path, maxelem=self.config.get("max_h5_elem", 256))}
         else:
             digest = {"MATData": mat_digest(path)}

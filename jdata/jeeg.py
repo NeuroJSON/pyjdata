@@ -738,9 +738,20 @@ def eeglab2jeeg(filename, maxsamples=None):
     to channels x (points*trials), keeping the trial count in the header so the
     shape can be recovered.
     """
-    from .jfile import loadmat
+    from .njdigest import is_hdf5
 
-    raw = loadmat(filename)
+    if is_hdf5(filename):
+        # v7.3 .set files are HDF5; scipy cannot read them at all. loadh5
+        # returns a plain dict, which the dict branch below already handles.
+        from .h5 import loadh5
+
+        raw = loadh5(filename)
+        if isinstance(raw, tuple):
+            raw = raw[0]
+    else:
+        from .jfile import loadmat
+
+        raw = loadmat(filename)
     eeg = raw.get("EEG", raw)
 
     if hasattr(eeg, "dtype") and getattr(eeg.dtype, "names", None):
@@ -771,6 +782,9 @@ def eeglab2jeeg(filename, maxsamples=None):
 
             if isinstance(candidate, (str, bytes, np.str_)):
                 external = str(candidate)
+        elif arr.dtype.kind == "u" and arr.ndim == 2 and min(arr.shape) == 1:
+            # a MATLAB char array out of HDF5: uint16 code points, not samples
+            external = _chars(arr)
 
     if external:
         fdt = _eeglab_fdt(filename, external)
@@ -828,6 +842,14 @@ def eeglab2jeeg(filename, maxsamples=None):
         "EEGSource": _source_block(filename, "EEGLAB", os.path.getsize(filename)),
         **({"EEGSourceBinary": fdtsource} if fdtsource else {}),
     }
+
+
+def _chars(arr):
+    """Decode a MATLAB v7.3 char array (uint16 code points) to text."""
+    try:
+        return "".join(chr(int(c)) for c in np.asarray(arr).ravel() if int(c)).strip()
+    except (TypeError, ValueError):
+        return ""
 
 
 def _eeglab_fdt(setpath, named):

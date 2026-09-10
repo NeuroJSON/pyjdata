@@ -86,6 +86,40 @@ def _decode(val):
 # =============================================================================
 
 
+
+#: HDF5 superblock signature.
+HDF5_SIGNATURE = b"\x89HDF\r\n\x1a\n"
+
+
+def is_hdf5(filename):
+    """True if the file is HDF5, including MATLAB v7.3.
+
+    A v7.3 MAT-file is HDF5 behind a 512-byte userblock carrying the old
+    v5-style header text, so it begins "MATLAB 7.3 MAT-file" and the superblock
+    signature only appears at offset 512. Every check in this tree looked at
+    offset 0 alone, so no v7.3 file was ever recognised: 1334 EEGLAB .set files
+    in one conversion pass fell through to the scipy reader and failed with
+    "Please use HDF reader for matlab v7.3 files".
+
+    The standard allows the userblock at any power-of-two offset from 512, so
+    the search follows that rather than testing 512 alone.
+    """
+    try:
+        with open(filename, "rb") as fid:
+            head = fid.read(8)
+            if head == HDF5_SIGNATURE:
+                return True
+            offset = 512
+            while offset <= 8388608:
+                fid.seek(offset)
+                if fid.read(8) == HDF5_SIGNATURE:
+                    return True
+                offset *= 2
+    except OSError:
+        return False
+    return False
+
+
 def hdf5_digest(filename, maxelem=256, maxdepth=32, exclude=None):
     """Summarise an HDF5 file without reading its bulk arrays.
 
@@ -160,9 +194,7 @@ def snirf_digest(filename, maxelem=256):
 
 def eeglab_digest(filename, maxelem=256):
     """EEGLAB ``.set`` digest, for both HDF5 (v7.3) and MAT v5 containers."""
-    with open(filename, "rb") as fid:
-        magic = fid.read(8)
-    if magic[:8] == b"\x89HDF\r\n\x1a\n":
+    if is_hdf5(filename):
         return {"EEGLABData": hdf5_digest(filename, maxelem=maxelem)}
     return {"EEGLABData": mat_digest(filename, maxelem=maxelem)}
 
